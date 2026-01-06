@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import * as fs from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
-import { CopilotInstructionsPlugin } from './index.js'
+import { CopilotInstructionsPlugin } from './index'
 
 // Note: getRelativePath is now an internal function (not exported)
 // to avoid OpenCode treating it as a plugin. It is tested indirectly

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import * as fs from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
-import { CopilotInstructionsPlugin } from './index.js'
+import { CopilotInstructionsPlugin } from './index'
 
 describe('Integration Tests', () => {
   let tempDir: string

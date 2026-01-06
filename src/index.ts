@@ -1,6 +1,7 @@
 import * as path from 'node:path'
 import type { Plugin } from '@opencode-ai/plugin'
-import { loadRepoInstructions, loadPathInstructions, type PathInstruction } from './loader.js'
+import { loadRepoInstructions, loadPathInstructions, type PathInstruction } from './loader'
+import { SessionState } from './session-state'
 
 /**
  * Convert an absolute path to a relative path from the given directory.
@@ -80,16 +81,8 @@ export const CopilotInstructionsPlugin: Plugin = async (ctx) => {
     log('No Copilot instructions found')
   }
 
-  // Track injected instructions per session
-  // Map<sessionID, Set<instructionFile>>
-  const injectedPerSession = new Map<string, Set<string>>()
-  
-  // Track sessions where we've injected repo instructions
-  const repoInstructionsInjected = new Set<string>()
-  
-  // Track pending instructions to inject per tool call
-  // Map<callID, instructionText>
-  const pendingInstructions = new Map<string, string>()
+  // Encapsulated state management
+  const state = new SessionState()
 
   return {
     // Listen for session.created events to inject repo-wide instructions
@@ -106,8 +99,8 @@ export const CopilotInstructionsPlugin: Plugin = async (ctx) => {
           const sessionId = (event.properties as any)?.info?.id
           log(`Extracted sessionId: ${sessionId}`, 'debug')
           
-          if (sessionId && !repoInstructionsInjected.has(sessionId)) {
-            repoInstructionsInjected.add(sessionId)
+          if (sessionId && !state.hasRepoInstructions(sessionId)) {
+            state.markRepoInstructionsInjected(sessionId)
             log(`Injecting repo instructions into session ${sessionId}`)
             
             try {
@@ -155,21 +148,18 @@ export const CopilotInstructionsPlugin: Plugin = async (ctx) => {
       const relativePath = getRelativePath(projectDir, filePath)
 
       // Find matching instructions that haven't been injected yet
-      const sessionInjected = injectedPerSession.get(input.sessionID) ?? new Set<string>()
-      injectedPerSession.set(input.sessionID, sessionInjected)
-
       const matchingInstructions: PathInstruction[] = []
 
       for (const instruction of pathInstructions) {
         // Skip if already injected in this session
-        if (sessionInjected.has(instruction.file)) {
+        if (state.isFileInjected(input.sessionID, instruction.file)) {
           continue
         }
 
         // Check if file matches this instruction's patterns
         if (instruction.matcher(relativePath)) {
           matchingInstructions.push(instruction)
-          sessionInjected.add(instruction.file)
+          state.markFileInjected(input.sessionID, instruction.file)
         }
       }
 
@@ -183,17 +173,15 @@ export const CopilotInstructionsPlugin: Plugin = async (ctx) => {
           })
           .join('\n\n')
 
-        pendingInstructions.set(input.callID, instructionText)
+        state.setPending(input.callID, instructionText)
         log(`Queued ${matchingInstructions.length} path instructions for ${relativePath}`, 'debug')
       }
     },
 
     'tool.execute.after': async (input, output) => {
       // Check if we have pending instructions for this tool call
-      const instructionText = pendingInstructions.get(input.callID)
+      const instructionText = state.consumePending(input.callID)
       if (instructionText) {
-        pendingInstructions.delete(input.callID)
-        
         // Append instructions to the tool output
         output.output = `${output.output}\n\n${instructionText}`
         log(`Injected path instructions for call ${input.callID}`, 'debug')
@@ -209,9 +197,9 @@ export const CopilotInstructionsPlugin: Plugin = async (ctx) => {
           if (part.type === 'tool') {
             // Tool state can be pending, running, or completed
             // Only completed state has output
-            const state = part.state as { output?: string }
-            if (state?.output) {
-              const markers = extractInstructionMarkers(state.output)
+            const toolState = part.state as { output?: string }
+            if (toolState?.output) {
+              const markers = extractInstructionMarkers(toolState.output)
               for (const marker of markers) {
                 presentMarkers.add(marker)
               }
@@ -220,17 +208,11 @@ export const CopilotInstructionsPlugin: Plugin = async (ctx) => {
         }
       }
 
-      // For each session in injectedPerSession, remove entries for instructions
-      // that are no longer present in the message history
-      for (const [sessionId, injectedFiles] of injectedPerSession) {
-        for (const file of injectedFiles) {
-          const filename = path.basename(file)
-          if (!presentMarkers.has(filename)) {
-            injectedFiles.delete(file)
-            log(`Cleared injection state for ${filename} (marker not in history)`, 'debug')
-          }
-        }
-      }
+      // Sync injection state with actual markers in message history
+      // This enables re-injection after undo operations
+      const clearedFiles: string[] = []
+      state.syncWithMarkers(presentMarkers)
+      // Note: logging of cleared files now handled internally by SessionState
     }
   }
 }

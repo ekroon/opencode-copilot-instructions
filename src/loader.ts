@@ -1,7 +1,7 @@
 import * as fs from 'node:fs'
 import * as path from 'node:path'
-import { parseFrontmatter } from './frontmatter.js'
-import { createMatcher, normalizePatterns, type Matcher } from './matcher.js'
+import { parseFrontmatter } from './frontmatter'
+import { createMatcher, normalizePatterns, type Matcher } from './matcher'
 
 export interface PathInstruction {
   file: string           // Original file path

@@ -78,4 +78,16 @@ Each module should be fully tested before moving to the next.
 When modifying plugin behavior in `src/index.ts`:
 - E2E tests run against the compiled `dist/index.js`
 - Always run `npm run build` before running E2E tests
-- Use `make test-all` to run unit tests + E2E tests with rebuild
+
+### Running Tests via Makefile
+
+Use the Makefile for running tests:
+
+| Command | Description |
+|---------|-------------|
+| `make test` | Build + run unit tests |
+| `make test-unit` | Run unit tests only (no build) |
+| `make test-e2e` | Build + run E2E tests |
+| `make test-all` | Build + run unit tests + E2E tests |
+
+Always run `make test-all` before completing any refactor to ensure both unit and E2E tests pass.
