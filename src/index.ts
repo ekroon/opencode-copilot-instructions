@@ -25,11 +25,11 @@ const FILE_TOOLS = new Set(['read', 'edit', 'write'])
 
 /**
  * Extract instruction filenames from markers in text.
- * Markers have the format: <!-- copilot-instruction:FILENAME -->
+ * Markers have the format: <copilot-instruction:FILENAME>
  */
 function extractInstructionMarkers(text: string): Set<string> {
   const markers = new Set<string>()
-  const regex = /<!--\s*copilot-instruction:([^\s>]+)\s*-->/g
+  const regex = /<copilot-instruction:([^>]+)>/g
   let match
   while ((match = regex.exec(text)) !== null) {
     markers.add(match[1])
@@ -179,7 +179,7 @@ export const CopilotInstructionsPlugin: Plugin = async (ctx) => {
           .map(i => {
             const filename = path.basename(i.file)
             const patterns = i.applyTo.join(', ')
-            return `<!-- copilot-instruction:${filename} -->\n## Path-Specific Instructions (applies to: ${patterns})\n\n${i.content.trimEnd()}\n<!-- /copilot-instruction:${filename} -->`
+            return `<copilot-instruction:${filename}>\n## Path-Specific Instructions (applies to: ${patterns})\n\n${i.content.trimEnd()}\n</copilot-instruction:${filename}>`
           })
           .join('\n\n')
 

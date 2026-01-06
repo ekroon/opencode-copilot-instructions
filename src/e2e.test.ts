@@ -99,11 +99,11 @@ function countInstructionMarkers(
 
   const escapedFileName = instructionFileName.replace(/\./g, '\\.')
   const startPattern = new RegExp(
-    `<!-- copilot-instruction:${escapedFileName} -->`,
+    `<copilot-instruction:${escapedFileName}>`,
     'g'
   )
   const endPattern = new RegExp(
-    `<!-- /copilot-instruction:${escapedFileName} -->`,
+    `</copilot-instruction:${escapedFileName}>`,
     'g'
   )
 
@@ -300,14 +300,14 @@ describe.skipIf(!process.env.OPENCODE_E2E)('E2E: Copilot Instructions Plugin', (
                 }
                 if (
                   toolPart.state.output.includes(
-                    '<!-- copilot-instruction:typescript.instructions.md -->'
+                    '<copilot-instruction:typescript.instructions.md>'
                   )
                 ) {
                   foundStartMarker = true
                 }
                 if (
                   toolPart.state.output.includes(
-                    '<!-- /copilot-instruction:typescript.instructions.md -->'
+                    '</copilot-instruction:typescript.instructions.md>'
                   )
                 ) {
                   foundEndMarker = true
@@ -369,14 +369,14 @@ describe.skipIf(!process.env.OPENCODE_E2E)('E2E: Copilot Instructions Plugin', (
               }
               if (
                 toolPart.state?.output?.includes(
-                  '<!-- copilot-instruction:typescript.instructions.md -->'
+                  '<copilot-instruction:typescript.instructions.md>'
                 )
               ) {
                 foundStartMarker = true
               }
               if (
                 toolPart.state?.output?.includes(
-                  '<!-- /copilot-instruction:typescript.instructions.md -->'
+                  '</copilot-instruction:typescript.instructions.md>'
                 )
               ) {
                 foundEndMarker = true
@@ -457,13 +457,13 @@ describe.skipIf(!process.env.OPENCODE_E2E)('E2E: Copilot Instructions Plugin', (
               }
               if (toolPart.state?.output) {
                 const startMatches = toolPart.state.output.match(
-                  /<!-- copilot-instruction:typescript\.instructions\.md -->/g
+                  /<copilot-instruction:typescript\.instructions\.md>/g
                 )
                 if (startMatches) {
                   startMarkerCount += startMatches.length
                 }
                 const endMatches = toolPart.state.output.match(
-                  /<!-- \/copilot-instruction:typescript\.instructions\.md -->/g
+                  /<\/copilot-instruction:typescript\.instructions\.md>/g
                 )
                 if (endMatches) {
                   endMarkerCount += endMatches.length

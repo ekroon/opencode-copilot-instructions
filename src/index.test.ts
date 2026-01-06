@@ -565,10 +565,10 @@ Source directory rules.`
       // Assert - each instruction should have its own header with applyTo pattern
       expect(afterOutput.output).toContain('## Path-Specific Instructions (applies to: **/*.ts)')
       expect(afterOutput.output).toContain('TypeScript rules.')
-      expect(afterOutput.output).toContain('<!-- /copilot-instruction:typescript.instructions.md -->')
+      expect(afterOutput.output).toContain('</copilot-instruction:typescript.instructions.md>')
       expect(afterOutput.output).toContain('## Path-Specific Instructions (applies to: src/**/*)')
       expect(afterOutput.output).toContain('Source directory rules.')
-      expect(afterOutput.output).toContain('<!-- /copilot-instruction:src.instructions.md -->')
+      expect(afterOutput.output).toContain('</copilot-instruction:src.instructions.md>')
     })
 
     it('should include instruction marker in injected output', async () => {
@@ -591,8 +591,8 @@ TypeScript rules.`
       )
 
       // Assert - should include start and end markers for re-injection logic
-      expect(afterOutput.output).toMatch(/<!-- copilot-instruction:.+\.instructions\.md -->/)
-      expect(afterOutput.output).toMatch(/<!-- \/copilot-instruction:.+\.instructions\.md -->/)
+      expect(afterOutput.output).toMatch(/<copilot-instruction:.+\.instructions\.md>/)
+      expect(afterOutput.output).toMatch(/<\/copilot-instruction:.+\.instructions\.md>/)
     })
 
     it('should output markers and content in correct order: start marker, content, end marker', async () => {
@@ -616,9 +616,9 @@ TypeScript rules.`
 
       // Assert - verify the order: start marker → content → end marker
       const output = afterOutput.output
-      const startMarkerIndex = output.indexOf('<!-- copilot-instruction:typescript.instructions.md -->')
+      const startMarkerIndex = output.indexOf('<copilot-instruction:typescript.instructions.md>')
       const contentIndex = output.indexOf('TypeScript rules.')
-      const endMarkerIndex = output.indexOf('<!-- /copilot-instruction:typescript.instructions.md -->')
+      const endMarkerIndex = output.indexOf('</copilot-instruction:typescript.instructions.md>')
 
       expect(startMarkerIndex).toBeGreaterThan(-1)
       expect(contentIndex).toBeGreaterThan(-1)

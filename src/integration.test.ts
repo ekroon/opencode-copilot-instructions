@@ -151,8 +151,8 @@ export function Button({ children }: { children: React.ReactNode }) {
       expect(afterOutput.output).toContain('explicit types')
       expect(afterOutput.output).not.toContain('React Guidelines')
       // Verify instruction markers (start and end)
-      expect(afterOutput.output).toContain('<!-- copilot-instruction:typescript.instructions.md -->')
-      expect(afterOutput.output).toContain('<!-- /copilot-instruction:typescript.instructions.md -->')
+      expect(afterOutput.output).toContain('<copilot-instruction:typescript.instructions.md>')
+      expect(afterOutput.output).toContain('</copilot-instruction:typescript.instructions.md>')
     })
 
     it('should inject React instructions for .tsx files', async () => {
@@ -169,8 +169,8 @@ export function Button({ children }: { children: React.ReactNode }) {
       expect(afterOutput.output).toContain('functional components')
       expect(afterOutput.output).not.toContain('TypeScript Guidelines')
       // Verify instruction markers (start and end)
-      expect(afterOutput.output).toContain('<!-- copilot-instruction:react.instructions.md -->')
-      expect(afterOutput.output).toContain('<!-- /copilot-instruction:react.instructions.md -->')
+      expect(afterOutput.output).toContain('<copilot-instruction:react.instructions.md>')
+      expect(afterOutput.output).toContain('</copilot-instruction:react.instructions.md>')
     })
 
     it('should not inject instructions for non-matching files', async () => {
@@ -442,8 +442,8 @@ Use type hints for all functions.`,
       // Assert
       expect(afterOutput.output).toContain('type hints')
       // Verify instruction markers (start and end)
-      expect(afterOutput.output).toContain('<!-- copilot-instruction:python.instructions.md -->')
-      expect(afterOutput.output).toContain('<!-- /copilot-instruction:python.instructions.md -->')
+      expect(afterOutput.output).toContain('<copilot-instruction:python.instructions.md>')
+      expect(afterOutput.output).toContain('</copilot-instruction:python.instructions.md>')
     })
 
     it('should not inject for non-matching files', async () => {
@@ -502,10 +502,10 @@ Test file rules apply.`,
       expect(afterOutput.output).toContain('TypeScript rules apply')
       expect(afterOutput.output).toContain('Source directory rules apply')
       // Verify both start and end markers for each instruction
-      expect(afterOutput.output).toContain('<!-- copilot-instruction:typescript.instructions.md -->')
-      expect(afterOutput.output).toContain('<!-- /copilot-instruction:typescript.instructions.md -->')
-      expect(afterOutput.output).toContain('<!-- copilot-instruction:src.instructions.md -->')
-      expect(afterOutput.output).toContain('<!-- /copilot-instruction:src.instructions.md -->')
+      expect(afterOutput.output).toContain('<copilot-instruction:typescript.instructions.md>')
+      expect(afterOutput.output).toContain('</copilot-instruction:typescript.instructions.md>')
+      expect(afterOutput.output).toContain('<copilot-instruction:src.instructions.md>')
+      expect(afterOutput.output).toContain('</copilot-instruction:src.instructions.md>')
     })
 
     it('should inject three matching instructions for test files in src', async () => {
@@ -524,12 +524,12 @@ Test file rules apply.`,
       expect(afterOutput.output).toContain('Source directory rules apply')
       expect(afterOutput.output).toContain('Test file rules apply')
       // Verify both start and end markers for each instruction
-      expect(afterOutput.output).toContain('<!-- copilot-instruction:typescript.instructions.md -->')
-      expect(afterOutput.output).toContain('<!-- /copilot-instruction:typescript.instructions.md -->')
-      expect(afterOutput.output).toContain('<!-- copilot-instruction:src.instructions.md -->')
-      expect(afterOutput.output).toContain('<!-- /copilot-instruction:src.instructions.md -->')
-      expect(afterOutput.output).toContain('<!-- copilot-instruction:tests.instructions.md -->')
-      expect(afterOutput.output).toContain('<!-- /copilot-instruction:tests.instructions.md -->')
+      expect(afterOutput.output).toContain('<copilot-instruction:typescript.instructions.md>')
+      expect(afterOutput.output).toContain('</copilot-instruction:typescript.instructions.md>')
+      expect(afterOutput.output).toContain('<copilot-instruction:src.instructions.md>')
+      expect(afterOutput.output).toContain('</copilot-instruction:src.instructions.md>')
+      expect(afterOutput.output).toContain('<copilot-instruction:tests.instructions.md>')
+      expect(afterOutput.output).toContain('</copilot-instruction:tests.instructions.md>')
     })
   })
 
@@ -569,10 +569,10 @@ Configuration file rules.`,
       expect(afterOutput1.output).toContain('Configuration file rules')
       expect(afterOutput2.output).toContain('Configuration file rules')
       // Verify instruction markers (start and end)
-      expect(afterOutput1.output).toContain('<!-- copilot-instruction:config.instructions.md -->')
-      expect(afterOutput1.output).toContain('<!-- /copilot-instruction:config.instructions.md -->')
-      expect(afterOutput2.output).toContain('<!-- copilot-instruction:config.instructions.md -->')
-      expect(afterOutput2.output).toContain('<!-- /copilot-instruction:config.instructions.md -->')
+      expect(afterOutput1.output).toContain('<copilot-instruction:config.instructions.md>')
+      expect(afterOutput1.output).toContain('</copilot-instruction:config.instructions.md>')
+      expect(afterOutput2.output).toContain('<copilot-instruction:config.instructions.md>')
+      expect(afterOutput2.output).toContain('</copilot-instruction:config.instructions.md>')
     })
 
     it('should match .github folder files', async () => {
@@ -586,8 +586,8 @@ Configuration file rules.`,
 
       expect(afterOutput.output).toContain('Configuration file rules')
       // Verify instruction markers (start and end)
-      expect(afterOutput.output).toContain('<!-- copilot-instruction:config.instructions.md -->')
-      expect(afterOutput.output).toContain('<!-- /copilot-instruction:config.instructions.md -->')
+      expect(afterOutput.output).toContain('<copilot-instruction:config.instructions.md>')
+      expect(afterOutput.output).toContain('</copilot-instruction:config.instructions.md>')
     })
 
     it('should not match non-config files in src', async () => {
@@ -653,11 +653,11 @@ TS instructions.`,
 
       // Assert - first calls should have instructions with start and end markers
       expect(afterOutput1a.output).toContain('TS instructions')
-      expect(afterOutput1a.output).toContain('<!-- copilot-instruction:ts.instructions.md -->')
-      expect(afterOutput1a.output).toContain('<!-- /copilot-instruction:ts.instructions.md -->')
+      expect(afterOutput1a.output).toContain('<copilot-instruction:ts.instructions.md>')
+      expect(afterOutput1a.output).toContain('</copilot-instruction:ts.instructions.md>')
       expect(afterOutput2a.output).toContain('TS instructions')
-      expect(afterOutput2a.output).toContain('<!-- copilot-instruction:ts.instructions.md -->')
-      expect(afterOutput2a.output).toContain('<!-- /copilot-instruction:ts.instructions.md -->')
+      expect(afterOutput2a.output).toContain('<copilot-instruction:ts.instructions.md>')
+      expect(afterOutput2a.output).toContain('</copilot-instruction:ts.instructions.md>')
 
       // Assert - second calls should be deduplicated
       expect(afterOutput1b.output).not.toContain('TS instructions')
