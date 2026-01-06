@@ -72,6 +72,10 @@ export const CopilotInstructionsPlugin: Plugin = async (ctx) => {
   
   // Track sessions where we've injected repo instructions
   const repoInstructionsInjected = new Set<string>()
+  
+  // Track pending instructions to inject per tool call
+  // Map<callID, instructionText>
+  const pendingInstructions = new Map<string, string>()
 
   return {
     // Listen for session.created events to inject repo-wide instructions
@@ -155,19 +159,26 @@ export const CopilotInstructionsPlugin: Plugin = async (ctx) => {
         }
       }
 
-      // Inject matching instructions
+      // Store matching instructions to inject in tool.execute.after
       if (matchingInstructions.length > 0) {
         const instructionText = matchingInstructions
-          .map(i => i.content)
+          .map(i => `## Path-Specific Instructions\n\n${i.content}`)
           .join('\n\n')
 
-        // Prepend to existing toolMessage if any
-        const existingMessage = (output as any).toolMessage
-        if (existingMessage) {
-          (output as any).toolMessage = `${instructionText}\n\n${existingMessage}`
-        } else {
-          (output as any).toolMessage = instructionText
-        }
+        pendingInstructions.set(input.callID, instructionText)
+        log(`Queued ${matchingInstructions.length} path instructions for ${relativePath}`, 'debug')
+      }
+    },
+
+    'tool.execute.after': async (input, output) => {
+      // Check if we have pending instructions for this tool call
+      const instructionText = pendingInstructions.get(input.callID)
+      if (instructionText) {
+        pendingInstructions.delete(input.callID)
+        
+        // Append instructions to the tool output
+        output.output = `${output.output}\n\n${instructionText}`
+        log(`Injected path instructions for call ${input.callID}`, 'debug')
       }
     }
   }

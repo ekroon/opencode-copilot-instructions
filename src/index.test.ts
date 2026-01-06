@@ -173,7 +173,23 @@ TS rules.`
     })
   })
 
-  describe('tool.execute.before hook', () => {
+  describe('tool.execute hooks', () => {
+    // Helper to simulate the full tool execution flow
+    async function executeToolWithHooks(
+      hooks: any,
+      input: { tool: string; sessionID: string; callID: string },
+      args: any,
+      existingOutput: string = 'File contents here'
+    ) {
+      const beforeOutput = { args } as any
+      await hooks['tool.execute.before']!(input, beforeOutput)
+      
+      const afterOutput = { title: '', output: existingOutput, metadata: {} }
+      await hooks['tool.execute.after']!(input, afterOutput)
+      
+      return { beforeOutput, afterOutput }
+    }
+
     it('should inject matching path instructions for read tool', async () => {
       // Arrange
       const instructionsDir = path.join(tempDir, '.github', 'instructions')
@@ -188,14 +204,13 @@ Use TypeScript strict mode.`
 
       const hooks = await CopilotInstructionsPlugin(createPluginInput())
       const input = { tool: 'read', sessionID: 'session-1', callID: 'call-1' }
-      const output = { args: { filePath: path.join(tempDir, 'src/index.ts') } } as any
+      const args = { filePath: path.join(tempDir, 'src/index.ts') }
 
       // Act
-      await hooks['tool.execute.before']!(input, output)
+      const { afterOutput } = await executeToolWithHooks(hooks, input, args)
 
       // Assert
-      expect(output.toolMessage).toBeDefined()
-      expect(output.toolMessage).toContain('Use TypeScript strict mode.')
+      expect(afterOutput.output).toContain('Use TypeScript strict mode.')
     })
 
     it('should inject matching path instructions for edit tool', async () => {
@@ -212,14 +227,13 @@ TypeScript editing rules.`
 
       const hooks = await CopilotInstructionsPlugin(createPluginInput())
       const input = { tool: 'edit', sessionID: 'session-1', callID: 'call-1' }
-      const output = { args: { filePath: path.join(tempDir, 'src/utils.ts') } } as any
+      const args = { filePath: path.join(tempDir, 'src/utils.ts') }
 
       // Act
-      await hooks['tool.execute.before']!(input, output)
+      const { afterOutput } = await executeToolWithHooks(hooks, input, args)
 
       // Assert
-      expect(output.toolMessage).toBeDefined()
-      expect(output.toolMessage).toContain('TypeScript editing rules.')
+      expect(afterOutput.output).toContain('TypeScript editing rules.')
     })
 
     it('should inject matching path instructions for write tool', async () => {
@@ -236,14 +250,13 @@ TypeScript writing rules.`
 
       const hooks = await CopilotInstructionsPlugin(createPluginInput())
       const input = { tool: 'write', sessionID: 'session-1', callID: 'call-1' }
-      const output = { args: { filePath: path.join(tempDir, 'src/new-file.ts') } } as any
+      const args = { filePath: path.join(tempDir, 'src/new-file.ts') }
 
       // Act
-      await hooks['tool.execute.before']!(input, output)
+      const { afterOutput } = await executeToolWithHooks(hooks, input, args)
 
       // Assert
-      expect(output.toolMessage).toBeDefined()
-      expect(output.toolMessage).toContain('TypeScript writing rules.')
+      expect(afterOutput.output).toContain('TypeScript writing rules.')
     })
 
     it('should not inject for non-matching files', async () => {
@@ -260,13 +273,15 @@ TypeScript rules.`
 
       const hooks = await CopilotInstructionsPlugin(createPluginInput())
       const input = { tool: 'read', sessionID: 'session-1', callID: 'call-1' }
-      const output = { args: { filePath: path.join(tempDir, 'readme.md') } } as any
+      const args = { filePath: path.join(tempDir, 'readme.md') }
+      const originalOutput = 'File contents'
 
       // Act
-      await hooks['tool.execute.before']!(input, output)
+      const { afterOutput } = await executeToolWithHooks(hooks, input, args, originalOutput)
 
-      // Assert
-      expect(output.toolMessage).toBeUndefined()
+      // Assert - output should remain unchanged (no instructions appended)
+      expect(afterOutput.output).toBe(originalOutput)
+      expect(afterOutput.output).not.toContain('TypeScript rules.')
     })
 
     it('should skip non-file tools', async () => {
@@ -283,13 +298,14 @@ TypeScript rules.`
 
       const hooks = await CopilotInstructionsPlugin(createPluginInput())
       const input = { tool: 'bash', sessionID: 'session-1', callID: 'call-1' }
-      const output = { args: { command: 'npm test' } } as any
+      const args = { command: 'npm test' }
+      const originalOutput = 'Command output'
 
       // Act
-      await hooks['tool.execute.before']!(input, output)
+      const { afterOutput } = await executeToolWithHooks(hooks, input, args, originalOutput)
 
       // Assert
-      expect(output.toolMessage).toBeUndefined()
+      expect(afterOutput.output).toBe(originalOutput)
     })
 
     it('should skip tools without filePath in args', async () => {
@@ -306,13 +322,14 @@ TypeScript rules.`
 
       const hooks = await CopilotInstructionsPlugin(createPluginInput())
       const input = { tool: 'read', sessionID: 'session-1', callID: 'call-1' }
-      const output = { args: {} } as any
+      const args = {}
+      const originalOutput = 'Some output'
 
       // Act
-      await hooks['tool.execute.before']!(input, output)
+      const { afterOutput } = await executeToolWithHooks(hooks, input, args, originalOutput)
 
       // Assert
-      expect(output.toolMessage).toBeUndefined()
+      expect(afterOutput.output).toBe(originalOutput)
     })
 
     it('should prevent duplicate injection per session', async () => {
@@ -329,20 +346,26 @@ TypeScript rules.`
 
       const hooks = await CopilotInstructionsPlugin(createPluginInput())
       const sessionID = 'session-1'
-      const filePath = path.join(tempDir, 'src/index.ts')
 
       // First call
-      const output1 = { args: { filePath } } as any
-      await hooks['tool.execute.before']!({ tool: 'read', sessionID, callID: 'call-1' }, output1)
+      const { afterOutput: afterOutput1 } = await executeToolWithHooks(
+        hooks,
+        { tool: 'read', sessionID, callID: 'call-1' },
+        { filePath: path.join(tempDir, 'src/index.ts') }
+      )
 
       // Second call with same session and matching file
-      const output2 = { args: { filePath: path.join(tempDir, 'src/other.ts') } } as any
-      await hooks['tool.execute.before']!({ tool: 'read', sessionID, callID: 'call-2' }, output2)
+      const { afterOutput: afterOutput2 } = await executeToolWithHooks(
+        hooks,
+        { tool: 'read', sessionID, callID: 'call-2' },
+        { filePath: path.join(tempDir, 'src/other.ts') },
+        'Second file contents'
+      )
 
       // Assert
-      expect(output1.toolMessage).toBeDefined()
-      expect(output1.toolMessage).toContain('TypeScript rules.')
-      expect(output2.toolMessage).toBeUndefined() // Should not inject again
+      expect(afterOutput1.output).toContain('TypeScript rules.')
+      expect(afterOutput2.output).not.toContain('TypeScript rules.') // Should not inject again
+      expect(afterOutput2.output).toBe('Second file contents')
     })
 
     it('should allow injection in different sessions', async () => {
@@ -360,16 +383,22 @@ TypeScript rules.`
       const hooks = await CopilotInstructionsPlugin(createPluginInput())
 
       // First session
-      const output1 = { args: { filePath: path.join(tempDir, 'src/index.ts') } } as any
-      await hooks['tool.execute.before']!({ tool: 'read', sessionID: 'session-1', callID: 'call-1' }, output1)
+      const { afterOutput: afterOutput1 } = await executeToolWithHooks(
+        hooks,
+        { tool: 'read', sessionID: 'session-1', callID: 'call-1' },
+        { filePath: path.join(tempDir, 'src/index.ts') }
+      )
 
       // Different session
-      const output2 = { args: { filePath: path.join(tempDir, 'src/index.ts') } } as any
-      await hooks['tool.execute.before']!({ tool: 'read', sessionID: 'session-2', callID: 'call-2' }, output2)
+      const { afterOutput: afterOutput2 } = await executeToolWithHooks(
+        hooks,
+        { tool: 'read', sessionID: 'session-2', callID: 'call-2' },
+        { filePath: path.join(tempDir, 'src/index.ts') }
+      )
 
       // Assert
-      expect(output1.toolMessage).toBeDefined()
-      expect(output2.toolMessage).toBeDefined()
+      expect(afterOutput1.output).toContain('TypeScript rules.')
+      expect(afterOutput2.output).toContain('TypeScript rules.')
     })
 
     it('should inject multiple matching instructions', async () => {
@@ -392,16 +421,18 @@ Source directory rules.`
       )
 
       const hooks = await CopilotInstructionsPlugin(createPluginInput())
-      const output = { args: { filePath: path.join(tempDir, 'src/index.ts') } } as any
-      await hooks['tool.execute.before']!({ tool: 'read', sessionID: 'session-1', callID: 'call-1' }, output)
+      const { afterOutput } = await executeToolWithHooks(
+        hooks,
+        { tool: 'read', sessionID: 'session-1', callID: 'call-1' },
+        { filePath: path.join(tempDir, 'src/index.ts') }
+      )
 
       // Assert
-      expect(output.toolMessage).toBeDefined()
-      expect(output.toolMessage).toContain('TypeScript rules.')
-      expect(output.toolMessage).toContain('Source directory rules.')
+      expect(afterOutput.output).toContain('TypeScript rules.')
+      expect(afterOutput.output).toContain('Source directory rules.')
     })
 
-    it('should prepend to existing toolMessage', async () => {
+    it('should append instructions to existing tool output', async () => {
       // Arrange
       const instructionsDir = path.join(tempDir, '.github', 'instructions')
       fs.mkdirSync(instructionsDir, { recursive: true })
@@ -414,19 +445,20 @@ TypeScript rules.`
       )
 
       const hooks = await CopilotInstructionsPlugin(createPluginInput())
-      const output = { 
-        args: { filePath: path.join(tempDir, 'src/index.ts') },
-        toolMessage: 'Existing message'
-      } as any
-
-      await hooks['tool.execute.before']!({ tool: 'read', sessionID: 'session-1', callID: 'call-1' }, output)
+      const existingOutput = 'File contents here'
+      const { afterOutput } = await executeToolWithHooks(
+        hooks,
+        { tool: 'read', sessionID: 'session-1', callID: 'call-1' },
+        { filePath: path.join(tempDir, 'src/index.ts') },
+        existingOutput
+      )
 
       // Assert
-      expect(output.toolMessage).toContain('TypeScript rules.')
-      expect(output.toolMessage).toContain('Existing message')
-      // Instructions should come before existing message
-      expect(output.toolMessage.indexOf('TypeScript rules.')).toBeLessThan(
-        output.toolMessage.indexOf('Existing message')
+      expect(afterOutput.output).toContain('TypeScript rules.')
+      expect(afterOutput.output).toContain(existingOutput)
+      // Original output should come before instructions
+      expect(afterOutput.output.indexOf(existingOutput)).toBeLessThan(
+        afterOutput.output.indexOf('TypeScript rules.')
       )
     })
 
@@ -443,13 +475,14 @@ TypeScript rules.`
       )
 
       const hooks = await CopilotInstructionsPlugin(createPluginInput())
-      const output = { args: { filePath: 'src/index.ts' } } as any
-
-      await hooks['tool.execute.before']!({ tool: 'read', sessionID: 'session-1', callID: 'call-1' }, output)
+      const { afterOutput } = await executeToolWithHooks(
+        hooks,
+        { tool: 'read', sessionID: 'session-1', callID: 'call-1' },
+        { filePath: 'src/index.ts' }
+      )
 
       // Assert
-      expect(output.toolMessage).toBeDefined()
-      expect(output.toolMessage).toContain('TypeScript rules.')
+      expect(afterOutput.output).toContain('TypeScript rules.')
     })
   })
 })
