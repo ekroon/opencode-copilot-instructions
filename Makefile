@@ -1,18 +1,18 @@
 .PHONY: test test-unit test-e2e test-all build clean install lint
 
 # Run unit tests only (excludes E2E)
-test: test-unit
+test: build test-unit
 
 # Run unit tests
 test-unit:
 	npm test
 
 # Run E2E tests (requires OPENCODE_E2E=true)
-test-e2e:
+test-e2e: build
 	OPENCODE_E2E=true npm run test:e2e
 
 # Run all tests (unit + E2E)
-test-all:
+test-all: build
 	npm run test:all
 	OPENCODE_E2E=true npm run test:e2e
 
