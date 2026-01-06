@@ -565,8 +565,10 @@ Source directory rules.`
       // Assert - each instruction should have its own header with applyTo pattern
       expect(afterOutput.output).toContain('## Path-Specific Instructions (applies to: **/*.ts)')
       expect(afterOutput.output).toContain('TypeScript rules.')
+      expect(afterOutput.output).toContain('<!-- /copilot-instruction:typescript.instructions.md -->')
       expect(afterOutput.output).toContain('## Path-Specific Instructions (applies to: src/**/*)')
       expect(afterOutput.output).toContain('Source directory rules.')
+      expect(afterOutput.output).toContain('<!-- /copilot-instruction:src.instructions.md -->')
     })
 
     it('should include instruction marker in injected output', async () => {
@@ -588,8 +590,43 @@ TypeScript rules.`
         { filePath: path.join(tempDir, 'src/index.ts') }
       )
 
-      // Assert - should include a marker that can be detected for re-injection logic
+      // Assert - should include start and end markers for re-injection logic
       expect(afterOutput.output).toMatch(/<!-- copilot-instruction:.+\.instructions\.md -->/)
+      expect(afterOutput.output).toMatch(/<!-- \/copilot-instruction:.+\.instructions\.md -->/)
+    })
+
+    it('should output markers and content in correct order: start marker, content, end marker', async () => {
+      // Arrange
+      const instructionsDir = path.join(tempDir, '.github', 'instructions')
+      fs.mkdirSync(instructionsDir, { recursive: true })
+      fs.writeFileSync(
+        path.join(instructionsDir, 'typescript.instructions.md'),
+        `---
+applyTo: "**/*.ts"
+---
+TypeScript rules.`
+      )
+
+      const hooks = await CopilotInstructionsPlugin(createPluginInput())
+      const { afterOutput } = await executeToolWithHooks(
+        hooks,
+        { tool: 'read', sessionID: 'session-1', callID: 'call-1' },
+        { filePath: path.join(tempDir, 'src/index.ts') }
+      )
+
+      // Assert - verify the order: start marker → content → end marker
+      const output = afterOutput.output
+      const startMarkerIndex = output.indexOf('<!-- copilot-instruction:typescript.instructions.md -->')
+      const contentIndex = output.indexOf('TypeScript rules.')
+      const endMarkerIndex = output.indexOf('<!-- /copilot-instruction:typescript.instructions.md -->')
+
+      expect(startMarkerIndex).toBeGreaterThan(-1)
+      expect(contentIndex).toBeGreaterThan(-1)
+      expect(endMarkerIndex).toBeGreaterThan(-1)
+
+      // Verify order: start marker comes before content, content comes before end marker
+      expect(startMarkerIndex).toBeLessThan(contentIndex)
+      expect(contentIndex).toBeLessThan(endMarkerIndex)
     })
 
     it('should re-inject instructions after undo removes them from history', async () => {

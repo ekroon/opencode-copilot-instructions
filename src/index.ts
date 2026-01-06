@@ -179,7 +179,7 @@ export const CopilotInstructionsPlugin: Plugin = async (ctx) => {
           .map(i => {
             const filename = path.basename(i.file)
             const patterns = i.applyTo.join(', ')
-            return `<!-- copilot-instruction:${filename} -->\n## Path-Specific Instructions (applies to: ${patterns})\n\n${i.content}`
+            return `<!-- copilot-instruction:${filename} -->\n## Path-Specific Instructions (applies to: ${patterns})\n\n${i.content.trimEnd()}\n<!-- /copilot-instruction:${filename} -->`
           })
           .join('\n\n')
 

@@ -86,6 +86,52 @@ async function waitForIdle(
 }
 
 /**
+ * Helper to count instruction markers in messages.
+ * Returns counts for both start and end markers.
+ */
+function countInstructionMarkers(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  messages: any[],
+  instructionFileName: string
+): { startCount: number; endCount: number } {
+  let startCount = 0
+  let endCount = 0
+
+  const escapedFileName = instructionFileName.replace(/\./g, '\\.')
+  const startPattern = new RegExp(
+    `<!-- copilot-instruction:${escapedFileName} -->`,
+    'g'
+  )
+  const endPattern = new RegExp(
+    `<!-- /copilot-instruction:${escapedFileName} -->`,
+    'g'
+  )
+
+  for (const msg of messages) {
+    for (const part of msg.parts) {
+      if (part.type === 'tool') {
+        const toolPart = part as {
+          type: 'tool'
+          state: { output?: string }
+        }
+        if (toolPart.state?.output) {
+          const startMatches = toolPart.state.output.match(startPattern)
+          if (startMatches) {
+            startCount += startMatches.length
+          }
+          const endMatches = toolPart.state.output.match(endPattern)
+          if (endMatches) {
+            endCount += endMatches.length
+          }
+        }
+      }
+    }
+  }
+
+  return { startCount, endCount }
+}
+
+/**
  * Full E2E tests that verify plugin behavior with real OpenCode server.
  *
  * NOTE: These tests are skipped by default because they:
@@ -237,7 +283,8 @@ describe.skipIf(!process.env.OPENCODE_E2E)('E2E: Copilot Instructions Plugin', (
 
         // Look for tool call outputs that contain our TS marker
         let foundTsMarker = false
-        let foundHtmlMarker = false
+        let foundStartMarker = false
+        let foundEndMarker = false
 
         for (const msg of messages) {
           for (const part of msg.parts) {
@@ -256,7 +303,14 @@ describe.skipIf(!process.env.OPENCODE_E2E)('E2E: Copilot Instructions Plugin', (
                     '<!-- copilot-instruction:typescript.instructions.md -->'
                   )
                 ) {
-                  foundHtmlMarker = true
+                  foundStartMarker = true
+                }
+                if (
+                  toolPart.state.output.includes(
+                    '<!-- /copilot-instruction:typescript.instructions.md -->'
+                  )
+                ) {
+                  foundEndMarker = true
                 }
               }
             }
@@ -264,7 +318,8 @@ describe.skipIf(!process.env.OPENCODE_E2E)('E2E: Copilot Instructions Plugin', (
         }
 
         expect(foundTsMarker).toBe(true)
-        expect(foundHtmlMarker).toBe(true)
+        expect(foundStartMarker).toBe(true)
+        expect(foundEndMarker).toBe(true)
       },
       LLM_TIMEOUT
     )
@@ -300,8 +355,9 @@ describe.skipIf(!process.env.OPENCODE_E2E)('E2E: Copilot Instructions Plugin', (
 
         const messages = messagesResponse.data ?? []
 
-        // Should NOT find TS marker in any tool output
-        let foundTsMarker = false
+        // Should NOT find TS marker (start or end) in any tool output
+        let foundStartMarker = false
+        let foundEndMarker = false
 
         for (const msg of messages) {
           for (const part of msg.parts) {
@@ -316,13 +372,21 @@ describe.skipIf(!process.env.OPENCODE_E2E)('E2E: Copilot Instructions Plugin', (
                   '<!-- copilot-instruction:typescript.instructions.md -->'
                 )
               ) {
-                foundTsMarker = true
+                foundStartMarker = true
+              }
+              if (
+                toolPart.state?.output?.includes(
+                  '<!-- /copilot-instruction:typescript.instructions.md -->'
+                )
+              ) {
+                foundEndMarker = true
               }
             }
           }
         }
 
-        expect(foundTsMarker).toBe(false)
+        expect(foundStartMarker).toBe(false)
+        expect(foundEndMarker).toBe(false)
       },
       LLM_TIMEOUT
     )
@@ -380,8 +444,9 @@ describe.skipIf(!process.env.OPENCODE_E2E)('E2E: Copilot Instructions Plugin', (
 
         const messages = messagesResponse.data ?? []
 
-        // Count how many times the TS instruction marker appears
-        let markerCount = 0
+        // Count how many times the TS instruction markers appear (both start and end)
+        let startMarkerCount = 0
+        let endMarkerCount = 0
 
         for (const msg of messages) {
           for (const part of msg.parts) {
@@ -391,19 +456,26 @@ describe.skipIf(!process.env.OPENCODE_E2E)('E2E: Copilot Instructions Plugin', (
                 state: { output?: string }
               }
               if (toolPart.state?.output) {
-                const matches = toolPart.state.output.match(
+                const startMatches = toolPart.state.output.match(
                   /<!-- copilot-instruction:typescript\.instructions\.md -->/g
                 )
-                if (matches) {
-                  markerCount += matches.length
+                if (startMatches) {
+                  startMarkerCount += startMatches.length
+                }
+                const endMatches = toolPart.state.output.match(
+                  /<!-- \/copilot-instruction:typescript\.instructions\.md -->/g
+                )
+                if (endMatches) {
+                  endMarkerCount += endMatches.length
                 }
               }
             }
           }
         }
 
-        // Should only appear once (first file read)
-        expect(markerCount).toBe(1)
+        // Should only appear once (first file read) - both start and end markers
+        expect(startMarkerCount).toBe(1)
+        expect(endMarkerCount).toBe(1)
       },
       LLM_TIMEOUT * 2
     )
@@ -453,27 +525,12 @@ describe.skipIf(!process.env.OPENCODE_E2E)('E2E: Copilot Instructions Plugin', (
         })
         let messages = messagesResponse.data ?? []
 
-        let markerCount = 0
-        for (const msg of messages) {
-          for (const part of msg.parts) {
-            if (part.type === 'tool') {
-              const toolPart = part as {
-                type: 'tool'
-                state: { output?: string }
-              }
-              if (toolPart.state?.output) {
-                const matches = toolPart.state.output.match(
-                  /<!-- copilot-instruction:typescript\.instructions\.md -->/g
-                )
-                if (matches) {
-                  markerCount += matches.length
-                }
-              }
-            }
-          }
-        }
-
-        expect(markerCount).toBe(1)
+        let markers = countInstructionMarkers(
+          messages,
+          'typescript.instructions.md'
+        )
+        expect(markers.startCount).toBe(1)
+        expect(markers.endCount).toBe(1)
 
         // Step 2: Get the message ID of the assistant's response containing the tool call
         const assistantMessage = messages.find(
@@ -505,28 +562,13 @@ describe.skipIf(!process.env.OPENCODE_E2E)('E2E: Copilot Instructions Plugin', (
         })
         messages = messagesResponse.data ?? []
 
-        markerCount = 0
-        for (const msg of messages) {
-          for (const part of msg.parts) {
-            if (part.type === 'tool') {
-              const toolPart = part as {
-                type: 'tool'
-                state: { output?: string }
-              }
-              if (toolPart.state?.output) {
-                const matches = toolPart.state.output.match(
-                  /<!-- copilot-instruction:typescript\.instructions\.md -->/g
-                )
-                if (matches) {
-                  markerCount += matches.length
-                }
-              }
-            }
-          }
-        }
-
+        markers = countInstructionMarkers(
+          messages,
+          'typescript.instructions.md'
+        )
         // Still only 1 marker (from step 1)
-        expect(markerCount).toBe(1)
+        expect(markers.startCount).toBe(1)
+        expect(markers.endCount).toBe(1)
 
         // Step 4: Revert both the assistant message and the user message that prompted it
         // First, find the user message that preceded the assistant message
@@ -580,28 +622,13 @@ describe.skipIf(!process.env.OPENCODE_E2E)('E2E: Copilot Instructions Plugin', (
         })
         messages = messagesResponse.data ?? []
 
-        markerCount = 0
-        for (const msg of messages) {
-          for (const part of msg.parts) {
-            if (part.type === 'tool') {
-              const toolPart = part as {
-                type: 'tool'
-                state: { output?: string }
-              }
-              if (toolPart.state?.output) {
-                const matches = toolPart.state.output.match(
-                  /<!-- copilot-instruction:typescript\.instructions\.md -->/g
-                )
-                if (matches) {
-                  markerCount += matches.length
-                }
-              }
-            }
-          }
-        }
-
+        markers = countInstructionMarkers(
+          messages,
+          'typescript.instructions.md'
+        )
         // Should have 1 marker again (re-injected after revert)
-        expect(markerCount).toBe(1)
+        expect(markers.startCount).toBe(1)
+        expect(markers.endCount).toBe(1)
       },
       LLM_TIMEOUT * 3
     )
@@ -644,27 +671,12 @@ describe.skipIf(!process.env.OPENCODE_E2E)('E2E: Copilot Instructions Plugin', (
         })
         let messages = messagesResponse.data ?? []
 
-        let markerCount = 0
-        for (const msg of messages) {
-          for (const part of msg.parts) {
-            if (part.type === 'tool') {
-              const toolPart = part as {
-                type: 'tool'
-                state: { output?: string }
-              }
-              if (toolPart.state?.output) {
-                const matches = toolPart.state.output.match(
-                  /<!-- copilot-instruction:typescript\.instructions\.md -->/g
-                )
-                if (matches) {
-                  markerCount += matches.length
-                }
-              }
-            }
-          }
-        }
-
-        expect(markerCount).toBe(1)
+        let markers = countInstructionMarkers(
+          messages,
+          'typescript.instructions.md'
+        )
+        expect(markers.startCount).toBe(1)
+        expect(markers.endCount).toBe(1)
 
         // Step 2: Get the message ID of the assistant's response containing the tool call
         const assistantMessage = messages.find(
@@ -714,28 +726,13 @@ describe.skipIf(!process.env.OPENCODE_E2E)('E2E: Copilot Instructions Plugin', (
         })
         messages = messagesResponse.data ?? []
 
-        markerCount = 0
-        for (const msg of messages) {
-          for (const part of msg.parts) {
-            if (part.type === 'tool') {
-              const toolPart = part as {
-                type: 'tool'
-                state: { output?: string }
-              }
-              if (toolPart.state?.output) {
-                const matches = toolPart.state.output.match(
-                  /<!-- copilot-instruction:typescript\.instructions\.md -->/g
-                )
-                if (matches) {
-                  markerCount += matches.length
-                }
-              }
-            }
-          }
-        }
-
+        markers = countInstructionMarkers(
+          messages,
+          'typescript.instructions.md'
+        )
         // Should still have exactly 1 marker (from the restored message, no new injection)
-        expect(markerCount).toBe(1)
+        expect(markers.startCount).toBe(1)
+        expect(markers.endCount).toBe(1)
       },
       LLM_TIMEOUT * 3
     )
