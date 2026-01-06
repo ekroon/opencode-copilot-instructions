@@ -72,3 +72,10 @@ Follow this sequence to ensure proper dependency management:
 4. `index.ts` - Depends on loader
 
 Each module should be fully tested before moving to the next.
+
+### 3. E2E Tests Require Rebuild
+
+When modifying plugin behavior in `src/index.ts`:
+- E2E tests run against the compiled `dist/index.js`
+- Always run `npm run build` before running E2E tests
+- Use `make test-all` to run unit tests + E2E tests with rebuild
