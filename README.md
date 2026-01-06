@@ -4,9 +4,7 @@ An OpenCode plugin that automatically loads GitHub Copilot custom instruction fi
 
 ## Installation
 
-```bash
-npm install @ekroon/opencode-copilot-instructions
-```
+### From npm (recommended)
 
 Add the plugin to your `opencode.json`:
 
@@ -16,13 +14,26 @@ Add the plugin to your `opencode.json`:
 }
 ```
 
-Alternatively, install directly from GitHub:
+OpenCode will automatically install the package from npm on startup.
+
+### From local files
+
+For development or customization, you can use the local plugin approach:
+
+1. Create `.opencode/plugin/` directory in your project
+2. Bundle the plugin: `bun build ./src/index.ts --outfile=.opencode/plugin/copilot.js --target=node --external:@opencode-ai/plugin`
+3. Create `.opencode/package.json` with dependencies:
 
 ```json
 {
-  "plugin": ["github:ekroon/opencode-copilot-instructions"]
+  "dependencies": {
+    "front-matter": "^4.0.2",
+    "picomatch": "^4.0.0"
+  }
 }
 ```
+
+4. Run `bun install` in the `.opencode/` directory
 
 ## Usage
 

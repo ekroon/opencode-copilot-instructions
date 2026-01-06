@@ -3,8 +3,9 @@ import { loadRepoInstructions, loadPathInstructions } from './loader.js';
 /**
  * Convert an absolute path to a relative path from the given directory.
  * If the path is already relative, returns it as-is.
+ * Note: This is intentionally NOT exported to avoid OpenCode treating it as a plugin
  */
-export function getRelativePath(directory, filePath) {
+function getRelativePath(directory, filePath) {
     // Normalize directory path (remove trailing slash)
     const normalizedDir = directory.endsWith('/') ? directory.slice(0, -1) : directory;
     // If path is already relative (doesn't start with /), return as-is
@@ -16,10 +17,18 @@ export function getRelativePath(directory, filePath) {
 }
 // Tools that work with file paths
 const FILE_TOOLS = new Set(['read', 'edit', 'write']);
-export const CopilotInstructionsPlugin = async ({ directory, client }) => {
+export const CopilotInstructionsPlugin = async (ctx) => {
+    const { directory, client } = ctx;
+    // Validate directory is provided and is a string
+    if (!directory || typeof directory !== 'string') {
+        console.error('[copilot-instructions] Invalid directory:', directory, 'ctx:', Object.keys(ctx));
+        throw new Error(`Plugin requires a valid directory string, got: ${typeof directory}`);
+    }
+    // Store directory in a local const to ensure closure captures it properly
+    const projectDir = directory;
     // Load instructions at startup
-    const repoInstructions = loadRepoInstructions(directory);
-    const pathInstructions = loadPathInstructions(directory);
+    const repoInstructions = loadRepoInstructions(projectDir);
+    const pathInstructions = loadPathInstructions(projectDir);
     // Helper to log messages
     const log = (message) => {
         client.app.log({
@@ -63,7 +72,7 @@ export const CopilotInstructionsPlugin = async ({ directory, client }) => {
                 return;
             }
             // Convert to relative path for matching
-            const relativePath = getRelativePath(directory, filePath);
+            const relativePath = getRelativePath(projectDir, filePath);
             // Find matching instructions that haven't been injected yet
             const sessionInjected = injectedPerSession.get(input.sessionID) ?? new Set();
             injectedPerSession.set(input.sessionID, sessionInjected);

@@ -2,55 +2,11 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import * as fs from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
-import { CopilotInstructionsPlugin, getRelativePath } from './index.js'
+import { CopilotInstructionsPlugin } from './index.js'
 
-describe('getRelativePath', () => {
-  it('should convert absolute path to relative path', () => {
-    const directory = '/home/user/project'
-    const filePath = '/home/user/project/src/index.ts'
-
-    const result = getRelativePath(directory, filePath)
-
-    expect(result).toBe('src/index.ts')
-  })
-
-  it('should handle already relative paths', () => {
-    const directory = '/home/user/project'
-    const filePath = 'src/index.ts'
-
-    const result = getRelativePath(directory, filePath)
-
-    expect(result).toBe('src/index.ts')
-  })
-
-  it('should handle paths outside directory', () => {
-    const directory = '/home/user/project'
-    const filePath = '/home/user/other/file.ts'
-
-    const result = getRelativePath(directory, filePath)
-
-    // Should return the path as-is or relative path that goes outside
-    expect(result).toBe('../other/file.ts')
-  })
-
-  it('should handle trailing slashes in directory', () => {
-    const directory = '/home/user/project/'
-    const filePath = '/home/user/project/src/index.ts'
-
-    const result = getRelativePath(directory, filePath)
-
-    expect(result).toBe('src/index.ts')
-  })
-
-  it('should handle exact match of directory and file', () => {
-    const directory = '/home/user/project'
-    const filePath = '/home/user/project'
-
-    const result = getRelativePath(directory, filePath)
-
-    expect(result).toBe('')
-  })
-})
+// Note: getRelativePath is now an internal function (not exported)
+// to avoid OpenCode treating it as a plugin. It is tested indirectly
+// through the tool.execute.before hook tests which use various path formats.
 
 describe('CopilotInstructionsPlugin', () => {
   let tempDir: string
