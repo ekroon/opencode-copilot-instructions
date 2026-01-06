@@ -1,3 +1,7 @@
+---
+status: done
+---
+
 # OpenCode Plugin: Copilot Custom Instructions Support
 
 ## Project Overview
