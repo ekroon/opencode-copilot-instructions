@@ -1,0 +1,511 @@
+/**
+ * End-to-end tests for the Copilot Instructions Plugin.
+ *
+ * These tests run a real OpenCode server with the plugin loaded and verify
+ * that instructions are correctly injected into chat sessions.
+ *
+ * IMPORTANT: These tests require:
+ * - OpenCode to be installed (`npm install -g opencode`)
+ * - A valid API key configured for at least one provider
+ * - The plugin to be built (`npm run build`)
+ *
+ * Run with: npm run test:e2e
+ */
+
+import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest'
+import { createOpencode, type OpencodeClient } from '@opencode-ai/sdk'
+import * as fs from 'node:fs'
+import * as path from 'node:path'
+
+// Timeout for operations that involve LLM calls
+const LLM_TIMEOUT = 60_000
+
+// Fast model for testing - uses less tokens and is faster
+const TEST_MODEL = {
+  providerID: 'github-copilot',
+  modelID: 'claude-haiku-4.5'
+}
+
+// Test directory setup - use a unique directory per run
+const TEST_DIR = path.join(process.cwd(), `.e2e-test-${Date.now()}`)
+const GITHUB_DIR = path.join(TEST_DIR, '.github')
+const INSTRUCTIONS_DIR = path.join(GITHUB_DIR, 'instructions')
+
+// Test instruction content with unique markers
+const REPO_INSTRUCTIONS = `# E2E Test Repository Instructions
+
+This is a test repository for e2e testing.
+Always respond with "E2E_REPO_MARKER_12345" when you see these instructions.
+`
+
+const TS_INSTRUCTIONS = `---
+applyTo: "**/*.ts"
+---
+# E2E Test TypeScript Instructions
+
+When working with TypeScript files:
+- Always include "E2E_TS_MARKER_67890" in your response
+- Use strict typing
+`
+
+const TEST_FILE_CONTENT = `// Test TypeScript file for e2e testing
+export function hello(): string {
+  return 'world'
+}
+`
+
+/**
+ * Helper to wait for session to become idle
+ */
+async function waitForIdle(
+  client: OpencodeClient,
+  sessionId: string,
+  maxWaitMs = 60_000
+): Promise<void> {
+  const startTime = Date.now()
+  const pollInterval = 1000
+
+  while (Date.now() - startTime < maxWaitMs) {
+    const statusResponse = await client.session.status({})
+
+    // Response is a map of sessionId -> status, empty object means all idle
+    const statusMap = statusResponse.data as
+      | Record<string, { type: string }>
+      | undefined
+    const status = statusMap?.[sessionId]
+
+    // If no status for this session or explicitly idle, we're done
+    if (!status || status.type === 'idle') {
+      return
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, pollInterval))
+  }
+
+  throw new Error(`Session did not become idle within ${maxWaitMs}ms`)
+}
+
+/**
+ * Full E2E tests that verify plugin behavior with real OpenCode server.
+ *
+ * NOTE: These tests are skipped by default because they:
+ * - Require OpenCode to be installed
+ * - Require API keys to be configured
+ * - Make actual LLM API calls (costs money)
+ * - Take a long time to run
+ *
+ * To run: OPENCODE_E2E=true npm run test:e2e
+ */
+describe.skipIf(!process.env.OPENCODE_E2E)('E2E: Copilot Instructions Plugin', () => {
+  let client: OpencodeClient
+  let server: { url: string; close(): void }
+  let sessionId: string
+
+  beforeAll(async () => {
+    // Create test directory structure
+    fs.mkdirSync(INSTRUCTIONS_DIR, { recursive: true })
+    fs.writeFileSync(
+      path.join(GITHUB_DIR, 'copilot-instructions.md'),
+      REPO_INSTRUCTIONS
+    )
+    fs.writeFileSync(
+      path.join(INSTRUCTIONS_DIR, 'typescript.instructions.md'),
+      TS_INSTRUCTIONS
+    )
+    fs.writeFileSync(path.join(TEST_DIR, 'test.ts'), TEST_FILE_CONTENT)
+
+    // Create opencode.json to load the local plugin
+    const pluginPath = path.resolve(process.cwd(), 'dist/index.js')
+    fs.writeFileSync(
+      path.join(TEST_DIR, 'opencode.json'),
+      JSON.stringify(
+        {
+          $schema: 'https://opencode.ai/config.json',
+          plugin: [pluginPath]
+        },
+        null,
+        2
+      )
+    )
+
+    // Change to test directory before starting server
+    const originalCwd = process.cwd()
+    process.chdir(TEST_DIR)
+
+    try {
+      // Start OpenCode server in test directory
+      const opencode = await createOpencode({
+        port: 0 // Random available port
+      })
+
+      client = opencode.client
+      server = opencode.server
+
+      console.log(`E2E test server started at ${server.url}`)
+    } finally {
+      process.chdir(originalCwd)
+    }
+  }, 60_000)
+
+  afterAll(async () => {
+    // Clean up server
+    if (server) {
+      server.close()
+    }
+
+    // Clean up test directory
+    if (fs.existsSync(TEST_DIR)) {
+      fs.rmSync(TEST_DIR, { recursive: true, force: true })
+    }
+  })
+
+  beforeEach(async () => {
+    // Create a fresh session for each test
+    const response = await client.session.create({
+      body: {
+        title: 'E2E Test Session'
+      }
+    })
+
+    if (!response.data) {
+      throw new Error('Failed to create session')
+    }
+
+    sessionId = response.data.id
+  })
+
+  describe('Repo-wide Instructions', () => {
+    it(
+      'should inject repo instructions on session creation',
+      async () => {
+        // Wait a bit for the session.created event to fire and instructions to be injected
+        await new Promise((resolve) => setTimeout(resolve, 2000))
+
+        // Get all messages in the session
+        const messagesResponse = await client.session.messages({
+          path: { id: sessionId }
+        })
+
+        const messages = messagesResponse.data ?? []
+
+        // Find a message containing the repo instructions
+        const hasRepoInstructions = messages.some((msg) =>
+          msg.parts.some((part) => {
+            if (part.type === 'text') {
+              const textPart = part as { type: 'text'; text: string }
+              return textPart.text.includes('E2E_REPO_MARKER_12345')
+            }
+            return false
+          })
+        )
+
+        expect(hasRepoInstructions).toBe(true)
+      },
+      LLM_TIMEOUT
+    )
+  })
+
+  describe('Path-specific Instructions', () => {
+    it(
+      'should inject TypeScript instructions when reading a .ts file',
+      async () => {
+        const testFilePath = path.join(TEST_DIR, 'test.ts')
+
+        // Send a prompt that asks the assistant to read a TypeScript file
+        await client.session.prompt({
+          path: { id: sessionId },
+          body: {
+            model: TEST_MODEL,
+            parts: [
+              {
+                type: 'text',
+                text: `Please read the file at ${testFilePath} and tell me what it contains.`
+              }
+            ]
+          }
+        })
+
+        // Wait for the session to become idle
+        await waitForIdle(client, sessionId)
+
+        // Get all messages
+        const messagesResponse = await client.session.messages({
+          path: { id: sessionId }
+        })
+
+        const messages = messagesResponse.data ?? []
+
+        // Look for tool call outputs that contain our TS marker
+        let foundTsMarker = false
+        let foundHtmlMarker = false
+
+        for (const msg of messages) {
+          for (const part of msg.parts) {
+            if (part.type === 'tool') {
+              const toolPart = part as {
+                type: 'tool'
+                tool: string
+                state: { output?: string }
+              }
+              if (toolPart.state?.output) {
+                if (toolPart.state.output.includes('E2E_TS_MARKER_67890')) {
+                  foundTsMarker = true
+                }
+                if (
+                  toolPart.state.output.includes(
+                    '<!-- copilot-instruction:typescript.instructions.md -->'
+                  )
+                ) {
+                  foundHtmlMarker = true
+                }
+              }
+            }
+          }
+        }
+
+        expect(foundTsMarker).toBe(true)
+        expect(foundHtmlMarker).toBe(true)
+      },
+      LLM_TIMEOUT
+    )
+
+    it(
+      'should not inject instructions for non-matching files',
+      async () => {
+        // Create a non-TypeScript file
+        fs.writeFileSync(path.join(TEST_DIR, 'test.json'), '{"foo": "bar"}')
+        const jsonFilePath = path.join(TEST_DIR, 'test.json')
+
+        // Ask the assistant to read the JSON file
+        await client.session.prompt({
+          path: { id: sessionId },
+          body: {
+            model: TEST_MODEL,
+            parts: [
+              {
+                type: 'text',
+                text: `Please read the file at ${jsonFilePath} and tell me what it contains.`
+              }
+            ]
+          }
+        })
+
+        // Wait for completion
+        await waitForIdle(client, sessionId)
+
+        // Get messages
+        const messagesResponse = await client.session.messages({
+          path: { id: sessionId }
+        })
+
+        const messages = messagesResponse.data ?? []
+
+        // Should NOT find TS marker in any tool output
+        let foundTsMarker = false
+
+        for (const msg of messages) {
+          for (const part of msg.parts) {
+            if (part.type === 'tool') {
+              const toolPart = part as {
+                type: 'tool'
+                tool: string
+                state: { output?: string }
+              }
+              if (
+                toolPart.state?.output?.includes(
+                  '<!-- copilot-instruction:typescript.instructions.md -->'
+                )
+              ) {
+                foundTsMarker = true
+              }
+            }
+          }
+        }
+
+        expect(foundTsMarker).toBe(false)
+      },
+      LLM_TIMEOUT
+    )
+  })
+
+  describe('Deduplication', () => {
+    it(
+      'should only inject instructions once per session',
+      async () => {
+        // Create TypeScript files
+        fs.writeFileSync(
+          path.join(TEST_DIR, 'test2.ts'),
+          'export const foo = 1'
+        )
+
+        const file1 = path.join(TEST_DIR, 'test.ts')
+        const file2 = path.join(TEST_DIR, 'test2.ts')
+
+        // Ask to read the first file
+        await client.session.prompt({
+          path: { id: sessionId },
+          body: {
+            model: TEST_MODEL,
+            parts: [
+              {
+                type: 'text',
+                text: `Please read the file at ${file1}`
+              }
+            ]
+          }
+        })
+
+        await waitForIdle(client, sessionId)
+
+        // Ask to read the second file
+        await client.session.prompt({
+          path: { id: sessionId },
+          body: {
+            model: TEST_MODEL,
+            parts: [
+              {
+                type: 'text',
+                text: `Please also read the file at ${file2}`
+              }
+            ]
+          }
+        })
+
+        await waitForIdle(client, sessionId)
+
+        // Get messages
+        const messagesResponse = await client.session.messages({
+          path: { id: sessionId }
+        })
+
+        const messages = messagesResponse.data ?? []
+
+        // Count how many times the TS instruction marker appears
+        let markerCount = 0
+
+        for (const msg of messages) {
+          for (const part of msg.parts) {
+            if (part.type === 'tool') {
+              const toolPart = part as {
+                type: 'tool'
+                state: { output?: string }
+              }
+              if (toolPart.state?.output) {
+                const matches = toolPart.state.output.match(
+                  /<!-- copilot-instruction:typescript\.instructions\.md -->/g
+                )
+                if (matches) {
+                  markerCount += matches.length
+                }
+              }
+            }
+          }
+        }
+
+        // Should only appear once (first file read)
+        expect(markerCount).toBe(1)
+      },
+      LLM_TIMEOUT * 2
+    )
+  })
+})
+
+/**
+ * Simpler E2E tests that don't require LLM calls.
+ * These use the SDK to verify the server starts correctly.
+ */
+describe('E2E: Plugin Loading', () => {
+  it('should start OpenCode server successfully', async () => {
+    // Just verify we can start and stop a server
+    const { server } = await createOpencode({ port: 0 })
+
+    expect(server.url).toMatch(/^http:\/\//)
+
+    server.close()
+  }, 30_000)
+})
+
+/**
+ * Export messages test - exports a session to JSON for manual inspection.
+ * This is useful for debugging and verifying plugin behavior.
+ *
+ * Run with: OPENCODE_EXPORT_TEST=true npm run test:e2e
+ */
+describe.skipIf(!process.env.OPENCODE_EXPORT_TEST)(
+  'E2E: Export Session Messages',
+  () => {
+    let client: OpencodeClient
+    let server: { url: string; close(): void }
+
+    beforeAll(async () => {
+      const opencode = await createOpencode({ port: 0 })
+      client = opencode.client
+      server = opencode.server
+    }, 30_000)
+
+    afterAll(() => {
+      if (server) {
+        server.close()
+      }
+    })
+
+    it(
+      'should export session messages to a file',
+      async () => {
+        // Create a session
+        const sessionResponse = await client.session.create({
+          body: { title: 'Export Test Session' }
+        })
+
+        const sessionId = sessionResponse.data?.id
+        if (!sessionId) {
+          throw new Error('Failed to create session')
+        }
+
+        // Send a simple prompt
+        await client.session.prompt({
+          path: { id: sessionId },
+          body: {
+            noReply: true, // Don't wait for LLM response
+            parts: [
+              {
+                type: 'text',
+                text: 'Hello, this is a test message.'
+              }
+            ]
+          }
+        })
+
+        // Wait a moment
+        await new Promise((resolve) => setTimeout(resolve, 1000))
+
+        // Get messages
+        const messagesResponse = await client.session.messages({
+          path: { id: sessionId }
+        })
+
+        const messages = messagesResponse.data ?? []
+
+        // Export to file
+        const exportPath = path.join(process.cwd(), 'e2e-export.json')
+        fs.writeFileSync(
+          exportPath,
+          JSON.stringify(
+            {
+              sessionId,
+              timestamp: new Date().toISOString(),
+              messages
+            },
+            null,
+            2
+          )
+        )
+
+        console.log(`Session exported to: ${exportPath}`)
+
+        expect(messages.length).toBeGreaterThan(0)
+      },
+      30_000
+    )
+  }
+)
