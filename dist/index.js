@@ -30,11 +30,11 @@ export const CopilotInstructionsPlugin = async (ctx) => {
     const repoInstructions = loadRepoInstructions(projectDir);
     const pathInstructions = loadPathInstructions(projectDir);
     // Helper to log messages
-    const log = (message) => {
+    const log = (message, level = 'info') => {
         client.app.log({
             body: {
                 service: 'copilot-instructions',
-                level: 'info',
+                level,
                 message
             }
         });
@@ -55,7 +55,36 @@ export const CopilotInstructionsPlugin = async (ctx) => {
     // Track injected instructions per session
     // Map<sessionID, Set<instructionFile>>
     const injectedPerSession = new Map();
+    // Track sessions where we've injected repo instructions
+    const repoInstructionsInjected = new Set();
     return {
+        // Listen for session.created events to inject repo-wide instructions
+        event: async ({ event }) => {
+            if (event.type === 'session.created' && repoInstructions) {
+                const sessionId = event.properties?.id;
+                if (sessionId && !repoInstructionsInjected.has(sessionId)) {
+                    repoInstructionsInjected.add(sessionId);
+                    log(`Injecting repo instructions into session ${sessionId}`, 'debug');
+                    try {
+                        await client.session.prompt({
+                            path: { id: sessionId },
+                            body: {
+                                noReply: true,
+                                parts: [{
+                                        type: 'text',
+                                        text: `## Copilot Custom Instructions\n\n${repoInstructions}`
+                                    }]
+                            }
+                        });
+                        log(`Injected repo instructions into session ${sessionId}`);
+                    }
+                    catch (err) {
+                        log(`Failed to inject repo instructions: ${err}`, 'debug');
+                    }
+                }
+            }
+        },
+        // Preserve repo-wide instructions during compaction
         'experimental.session.compacting': async (_input, output) => {
             if (repoInstructions) {
                 output.context.push(`## Copilot Custom Instructions\n\n${repoInstructions}`);
