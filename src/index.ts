@@ -116,3 +116,6 @@ export const CopilotInstructionsPlugin: Plugin = async ({ directory, client }) =
     }
   }
 }
+
+// Default export for easier loading
+export default CopilotInstructionsPlugin
