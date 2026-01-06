@@ -408,6 +408,338 @@ describe.skipIf(!process.env.OPENCODE_E2E)('E2E: Copilot Instructions Plugin', (
       LLM_TIMEOUT * 2
     )
   })
+
+  describe('Undo/Revert Flow', () => {
+    it(
+      'should re-inject instructions after reverting a message containing the marker',
+      async () => {
+        // Create additional TypeScript files for this test
+        fs.writeFileSync(
+          path.join(TEST_DIR, 'undo-test1.ts'),
+          'export const undo1 = 1'
+        )
+        fs.writeFileSync(
+          path.join(TEST_DIR, 'undo-test2.ts'),
+          'export const undo2 = 2'
+        )
+        fs.writeFileSync(
+          path.join(TEST_DIR, 'undo-test3.ts'),
+          'export const undo3 = 3'
+        )
+
+        const file1 = path.join(TEST_DIR, 'undo-test1.ts')
+        const file2 = path.join(TEST_DIR, 'undo-test2.ts')
+        const file3 = path.join(TEST_DIR, 'undo-test3.ts')
+
+        // Step 1: Read first .ts file → instructions should be injected
+        await client.session.prompt({
+          path: { id: sessionId },
+          body: {
+            model: TEST_MODEL,
+            parts: [
+              {
+                type: 'text',
+                text: `Please read the file at ${file1}`
+              }
+            ]
+          }
+        })
+
+        await waitForIdle(client, sessionId)
+
+        // Verify instructions were injected in step 1
+        let messagesResponse = await client.session.messages({
+          path: { id: sessionId }
+        })
+        let messages = messagesResponse.data ?? []
+
+        let markerCount = 0
+        for (const msg of messages) {
+          for (const part of msg.parts) {
+            if (part.type === 'tool') {
+              const toolPart = part as {
+                type: 'tool'
+                state: { output?: string }
+              }
+              if (toolPart.state?.output) {
+                const matches = toolPart.state.output.match(
+                  /<!-- copilot-instruction:typescript\.instructions\.md -->/g
+                )
+                if (matches) {
+                  markerCount += matches.length
+                }
+              }
+            }
+          }
+        }
+
+        expect(markerCount).toBe(1)
+
+        // Step 2: Get the message ID of the assistant's response containing the tool call
+        const assistantMessage = messages.find(
+          (m) => m.info.role === 'assistant'
+        )
+        const messageIdToRevert = assistantMessage?.info.id
+
+        expect(messageIdToRevert).toBeDefined()
+
+        // Step 3: Read another .ts file → instructions should NOT be injected (deduplication)
+        await client.session.prompt({
+          path: { id: sessionId },
+          body: {
+            model: TEST_MODEL,
+            parts: [
+              {
+                type: 'text',
+                text: `Please read the file at ${file2}`
+              }
+            ]
+          }
+        })
+
+        await waitForIdle(client, sessionId)
+
+        // Verify no new marker was injected
+        messagesResponse = await client.session.messages({
+          path: { id: sessionId }
+        })
+        messages = messagesResponse.data ?? []
+
+        markerCount = 0
+        for (const msg of messages) {
+          for (const part of msg.parts) {
+            if (part.type === 'tool') {
+              const toolPart = part as {
+                type: 'tool'
+                state: { output?: string }
+              }
+              if (toolPart.state?.output) {
+                const matches = toolPart.state.output.match(
+                  /<!-- copilot-instruction:typescript\.instructions\.md -->/g
+                )
+                if (matches) {
+                  markerCount += matches.length
+                }
+              }
+            }
+          }
+        }
+
+        // Still only 1 marker (from step 1)
+        expect(markerCount).toBe(1)
+
+        // Step 4: Revert both the assistant message and the user message that prompted it
+        // First, find the user message that preceded the assistant message
+        const userMessageBeforeAssistant = messages.find(
+          (m) =>
+            m.info.role === 'user' &&
+            m.parts.some(
+              (p) =>
+                p.type === 'text' &&
+                (p as { type: 'text'; text: string }).text.includes(file1)
+            )
+        )
+        const userMessageIdToRevert = userMessageBeforeAssistant?.info.id
+
+        // Revert the assistant message first
+        await client.session.revert({
+          path: { id: sessionId },
+          body: { messageID: messageIdToRevert! }
+        })
+
+        // Also revert the user message if it exists and is different
+        if (userMessageIdToRevert && userMessageIdToRevert !== messageIdToRevert) {
+          await client.session.revert({
+            path: { id: sessionId },
+            body: { messageID: userMessageIdToRevert }
+          })
+        }
+
+        // Wait a moment for the revert to take effect
+        await new Promise((resolve) => setTimeout(resolve, 1000))
+
+        // Step 5: Read a third .ts file → instructions SHOULD be re-injected
+        await client.session.prompt({
+          path: { id: sessionId },
+          body: {
+            model: TEST_MODEL,
+            parts: [
+              {
+                type: 'text',
+                text: `Please read the file at ${file3}`
+              }
+            ]
+          }
+        })
+
+        await waitForIdle(client, sessionId)
+
+        // Verify marker was re-injected
+        messagesResponse = await client.session.messages({
+          path: { id: sessionId }
+        })
+        messages = messagesResponse.data ?? []
+
+        markerCount = 0
+        for (const msg of messages) {
+          for (const part of msg.parts) {
+            if (part.type === 'tool') {
+              const toolPart = part as {
+                type: 'tool'
+                state: { output?: string }
+              }
+              if (toolPart.state?.output) {
+                const matches = toolPart.state.output.match(
+                  /<!-- copilot-instruction:typescript\.instructions\.md -->/g
+                )
+                if (matches) {
+                  markerCount += matches.length
+                }
+              }
+            }
+          }
+        }
+
+        // Should have 1 marker again (re-injected after revert)
+        expect(markerCount).toBe(1)
+      },
+      LLM_TIMEOUT * 3
+    )
+
+    it(
+      'should NOT re-inject instructions after redo restores the marker',
+      async () => {
+        // Create TypeScript files for this test
+        fs.writeFileSync(
+          path.join(TEST_DIR, 'redo-test1.ts'),
+          'export const redo1 = 1'
+        )
+        fs.writeFileSync(
+          path.join(TEST_DIR, 'redo-test2.ts'),
+          'export const redo2 = 2'
+        )
+
+        const file1 = path.join(TEST_DIR, 'redo-test1.ts')
+        const file2 = path.join(TEST_DIR, 'redo-test2.ts')
+
+        // Step 1: Read first .ts file → instructions should be injected
+        await client.session.prompt({
+          path: { id: sessionId },
+          body: {
+            model: TEST_MODEL,
+            parts: [
+              {
+                type: 'text',
+                text: `Please read the file at ${file1}`
+              }
+            ]
+          }
+        })
+
+        await waitForIdle(client, sessionId)
+
+        // Verify instructions were injected in step 1
+        let messagesResponse = await client.session.messages({
+          path: { id: sessionId }
+        })
+        let messages = messagesResponse.data ?? []
+
+        let markerCount = 0
+        for (const msg of messages) {
+          for (const part of msg.parts) {
+            if (part.type === 'tool') {
+              const toolPart = part as {
+                type: 'tool'
+                state: { output?: string }
+              }
+              if (toolPart.state?.output) {
+                const matches = toolPart.state.output.match(
+                  /<!-- copilot-instruction:typescript\.instructions\.md -->/g
+                )
+                if (matches) {
+                  markerCount += matches.length
+                }
+              }
+            }
+          }
+        }
+
+        expect(markerCount).toBe(1)
+
+        // Step 2: Get the message ID of the assistant's response containing the tool call
+        const assistantMessage = messages.find(
+          (m) => m.info.role === 'assistant'
+        )
+        const messageIdToRevert = assistantMessage?.info.id
+
+        expect(messageIdToRevert).toBeDefined()
+
+        // Step 3: Call session.revert() to undo that message
+        await client.session.revert({
+          path: { id: sessionId },
+          body: { messageID: messageIdToRevert! }
+        })
+
+        // Wait a moment for the revert to take effect
+        await new Promise((resolve) => setTimeout(resolve, 1000))
+
+        // Step 4: Call session.unrevert() to redo (restore the message with the marker)
+        await client.session.unrevert({
+          path: { id: sessionId }
+        })
+
+        // Wait a moment for the unrevert to take effect
+        await new Promise((resolve) => setTimeout(resolve, 1000))
+
+        // Step 5: Read another .ts file → instructions should NOT be injected
+        // because the marker is back in the message history
+        await client.session.prompt({
+          path: { id: sessionId },
+          body: {
+            model: TEST_MODEL,
+            parts: [
+              {
+                type: 'text',
+                text: `Please read the file at ${file2}`
+              }
+            ]
+          }
+        })
+
+        await waitForIdle(client, sessionId)
+
+        // Step 6: Verify marker count is still 1 (no new injection after redo)
+        messagesResponse = await client.session.messages({
+          path: { id: sessionId }
+        })
+        messages = messagesResponse.data ?? []
+
+        markerCount = 0
+        for (const msg of messages) {
+          for (const part of msg.parts) {
+            if (part.type === 'tool') {
+              const toolPart = part as {
+                type: 'tool'
+                state: { output?: string }
+              }
+              if (toolPart.state?.output) {
+                const matches = toolPart.state.output.match(
+                  /<!-- copilot-instruction:typescript\.instructions\.md -->/g
+                )
+                if (matches) {
+                  markerCount += matches.length
+                }
+              }
+            }
+          }
+        }
+
+        // Should still have exactly 1 marker (from the restored message, no new injection)
+        expect(markerCount).toBe(1)
+      },
+      LLM_TIMEOUT * 3
+    )
+  })
 })
 
 /**
