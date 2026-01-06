@@ -23,6 +23,20 @@ function getRelativePath(directory: string, filePath: string): string {
 // Tools that work with file paths
 const FILE_TOOLS = new Set(['read', 'edit', 'write'])
 
+/**
+ * Extract instruction filenames from markers in text.
+ * Markers have the format: <!-- copilot-instruction:FILENAME -->
+ */
+function extractInstructionMarkers(text: string): Set<string> {
+  const markers = new Set<string>()
+  const regex = /<!--\s*copilot-instruction:([^\s>]+)\s*-->/g
+  let match
+  while ((match = regex.exec(text)) !== null) {
+    markers.add(match[1])
+  }
+  return markers
+}
+
 export const CopilotInstructionsPlugin: Plugin = async (ctx) => {
   const { directory, client } = ctx
 
@@ -162,7 +176,11 @@ export const CopilotInstructionsPlugin: Plugin = async (ctx) => {
       // Store matching instructions to inject in tool.execute.after
       if (matchingInstructions.length > 0) {
         const instructionText = matchingInstructions
-          .map(i => `## Path-Specific Instructions\n\n${i.content}`)
+          .map(i => {
+            const filename = path.basename(i.file)
+            const patterns = i.applyTo.join(', ')
+            return `<!-- copilot-instruction:${filename} -->\n## Path-Specific Instructions (applies to: ${patterns})\n\n${i.content}`
+          })
           .join('\n\n')
 
         pendingInstructions.set(input.callID, instructionText)
@@ -179,6 +197,39 @@ export const CopilotInstructionsPlugin: Plugin = async (ctx) => {
         // Append instructions to the tool output
         output.output = `${output.output}\n\n${instructionText}`
         log(`Injected path instructions for call ${input.callID}`, 'debug')
+      }
+    },
+
+    'experimental.chat.messages.transform': async (_input, output) => {
+      // Scan all messages to find which instruction markers are present
+      const presentMarkers = new Set<string>()
+
+      for (const message of output.messages) {
+        for (const part of message.parts) {
+          if (part.type === 'tool') {
+            // Tool state can be pending, running, or completed
+            // Only completed state has output
+            const state = part.state as { output?: string }
+            if (state?.output) {
+              const markers = extractInstructionMarkers(state.output)
+              for (const marker of markers) {
+                presentMarkers.add(marker)
+              }
+            }
+          }
+        }
+      }
+
+      // For each session in injectedPerSession, remove entries for instructions
+      // that are no longer present in the message history
+      for (const [sessionId, injectedFiles] of injectedPerSession) {
+        for (const file of injectedFiles) {
+          const filename = path.basename(file)
+          if (!presentMarkers.has(filename)) {
+            injectedFiles.delete(file)
+            log(`Cleared injection state for ${filename} (marker not in history)`, 'debug')
+          }
+        }
       }
     }
   }

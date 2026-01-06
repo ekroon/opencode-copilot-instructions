@@ -484,5 +484,202 @@ TypeScript rules.`
       // Assert
       expect(afterOutput.output).toContain('TypeScript rules.')
     })
+
+    it('should include applyTo pattern in header for single pattern', async () => {
+      // Arrange
+      const instructionsDir = path.join(tempDir, '.github', 'instructions')
+      fs.mkdirSync(instructionsDir, { recursive: true })
+      fs.writeFileSync(
+        path.join(instructionsDir, 'typescript.instructions.md'),
+        `---
+applyTo: "**/*.ts"
+---
+Use TypeScript strict mode.`
+      )
+
+      const hooks = await CopilotInstructionsPlugin(createPluginInput())
+      const { afterOutput } = await executeToolWithHooks(
+        hooks,
+        { tool: 'read', sessionID: 'session-1', callID: 'call-1' },
+        { filePath: path.join(tempDir, 'src/index.ts') }
+      )
+
+      // Assert
+      expect(afterOutput.output).toContain('## Path-Specific Instructions (applies to: **/*.ts)')
+      expect(afterOutput.output).toContain('Use TypeScript strict mode.')
+    })
+
+    it('should include applyTo patterns in header for multiple patterns (array)', async () => {
+      // Arrange
+      const instructionsDir = path.join(tempDir, '.github', 'instructions')
+      fs.mkdirSync(instructionsDir, { recursive: true })
+      fs.writeFileSync(
+        path.join(instructionsDir, 'web-files.instructions.md'),
+        `---
+applyTo:
+  - "**/*.ts"
+  - "**/*.tsx"
+  - "**/*.js"
+---
+Web file rules.`
+      )
+
+      const hooks = await CopilotInstructionsPlugin(createPluginInput())
+      const { afterOutput } = await executeToolWithHooks(
+        hooks,
+        { tool: 'read', sessionID: 'session-1', callID: 'call-1' },
+        { filePath: path.join(tempDir, 'src/component.tsx') }
+      )
+
+      // Assert
+      expect(afterOutput.output).toContain('## Path-Specific Instructions (applies to: **/*.ts, **/*.tsx, **/*.js)')
+      expect(afterOutput.output).toContain('Web file rules.')
+    })
+
+    it('should include applyTo pattern for each instruction when multiple match', async () => {
+      // Arrange
+      const instructionsDir = path.join(tempDir, '.github', 'instructions')
+      fs.mkdirSync(instructionsDir, { recursive: true })
+      fs.writeFileSync(
+        path.join(instructionsDir, 'typescript.instructions.md'),
+        `---
+applyTo: "**/*.ts"
+---
+TypeScript rules.`
+      )
+      fs.writeFileSync(
+        path.join(instructionsDir, 'src.instructions.md'),
+        `---
+applyTo: "src/**/*"
+---
+Source directory rules.`
+      )
+
+      const hooks = await CopilotInstructionsPlugin(createPluginInput())
+      const { afterOutput } = await executeToolWithHooks(
+        hooks,
+        { tool: 'read', sessionID: 'session-1', callID: 'call-1' },
+        { filePath: path.join(tempDir, 'src/index.ts') }
+      )
+
+      // Assert - each instruction should have its own header with applyTo pattern
+      expect(afterOutput.output).toContain('## Path-Specific Instructions (applies to: **/*.ts)')
+      expect(afterOutput.output).toContain('TypeScript rules.')
+      expect(afterOutput.output).toContain('## Path-Specific Instructions (applies to: src/**/*)')
+      expect(afterOutput.output).toContain('Source directory rules.')
+    })
+
+    it('should include instruction marker in injected output', async () => {
+      // Arrange
+      const instructionsDir = path.join(tempDir, '.github', 'instructions')
+      fs.mkdirSync(instructionsDir, { recursive: true })
+      fs.writeFileSync(
+        path.join(instructionsDir, 'typescript.instructions.md'),
+        `---
+applyTo: "**/*.ts"
+---
+TypeScript rules.`
+      )
+
+      const hooks = await CopilotInstructionsPlugin(createPluginInput())
+      const { afterOutput } = await executeToolWithHooks(
+        hooks,
+        { tool: 'read', sessionID: 'session-1', callID: 'call-1' },
+        { filePath: path.join(tempDir, 'src/index.ts') }
+      )
+
+      // Assert - should include a marker that can be detected for re-injection logic
+      expect(afterOutput.output).toMatch(/<!-- copilot-instruction:.+\.instructions\.md -->/)
+    })
+
+    it('should re-inject instructions after undo removes them from history', async () => {
+      // Arrange
+      const instructionsDir = path.join(tempDir, '.github', 'instructions')
+      fs.mkdirSync(instructionsDir, { recursive: true })
+      fs.writeFileSync(
+        path.join(instructionsDir, 'typescript.instructions.md'),
+        `---
+applyTo: "**/*.ts"
+---
+TypeScript rules.`
+      )
+
+      const hooks = await CopilotInstructionsPlugin(createPluginInput())
+      const sessionID = 'session-1'
+
+      // First call - inject instructions
+      const { afterOutput: afterOutput1 } = await executeToolWithHooks(
+        hooks,
+        { tool: 'read', sessionID, callID: 'call-1' },
+        { filePath: path.join(tempDir, 'src/index.ts') }
+      )
+      expect(afterOutput1.output).toContain('TypeScript rules.')
+
+      // Second call - should NOT inject (already injected)
+      const { afterOutput: afterOutput2 } = await executeToolWithHooks(
+        hooks,
+        { tool: 'read', sessionID, callID: 'call-2' },
+        { filePath: path.join(tempDir, 'src/other.ts') },
+        'Other file contents'
+      )
+      expect(afterOutput2.output).toBe('Other file contents')
+
+      // Simulate /undo - messages transform hook is called with history that doesn't contain our marker
+      const messagesOutput = { messages: [] as any[] }
+      await hooks['experimental.chat.messages.transform']!({}, messagesOutput)
+
+      // Third call - should re-inject because marker is gone from history
+      const { afterOutput: afterOutput3 } = await executeToolWithHooks(
+        hooks,
+        { tool: 'read', sessionID, callID: 'call-3' },
+        { filePath: path.join(tempDir, 'src/another.ts') }
+      )
+      expect(afterOutput3.output).toContain('TypeScript rules.')
+    })
+
+    it('should NOT re-inject if marker is still present in message history', async () => {
+      // Arrange
+      const instructionsDir = path.join(tempDir, '.github', 'instructions')
+      fs.mkdirSync(instructionsDir, { recursive: true })
+      fs.writeFileSync(
+        path.join(instructionsDir, 'typescript.instructions.md'),
+        `---
+applyTo: "**/*.ts"
+---
+TypeScript rules.`
+      )
+
+      const hooks = await CopilotInstructionsPlugin(createPluginInput())
+      const sessionID = 'session-1'
+
+      // First call - inject instructions
+      const { afterOutput: afterOutput1 } = await executeToolWithHooks(
+        hooks,
+        { tool: 'read', sessionID, callID: 'call-1' },
+        { filePath: path.join(tempDir, 'src/index.ts') }
+      )
+      expect(afterOutput1.output).toContain('TypeScript rules.')
+
+      // Simulate messages transform with our marker still present in a tool output
+      const messagesOutput = {
+        messages: [{
+          info: { sessionID } as any,
+          parts: [{
+            type: 'tool',
+            state: { status: 'completed', output: afterOutput1.output }
+          }] as any[]
+        }]
+      }
+      await hooks['experimental.chat.messages.transform']!({}, messagesOutput)
+
+      // Second call - should NOT inject because marker is still in history
+      const { afterOutput: afterOutput2 } = await executeToolWithHooks(
+        hooks,
+        { tool: 'read', sessionID, callID: 'call-2' },
+        { filePath: path.join(tempDir, 'src/other.ts') },
+        'Other file contents'
+      )
+      expect(afterOutput2.output).toBe('Other file contents')
+    })
   })
 })
