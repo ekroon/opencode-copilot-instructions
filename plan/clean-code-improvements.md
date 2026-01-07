@@ -36,13 +36,22 @@ class SessionState {
 
 ### 2. Fix Type Safety (High Priority)
 
-**Problem**: `src/index.ts:106` uses `(event.properties as any)?.info?.id`
+**Problem**: ~~`src/index.ts:106` uses `(event.properties as any)?.info?.id`~~ **FIXED**
 
-**Solution**: Define proper event types:
+**Solution**: Used SDK's built-in types with type guard:
 
-- [ ] Create event type discriminated union or interface
-- [ ] Remove all `as any` casts
-- [ ] Add type guards where needed
+- [x] Create event type discriminated union or interface
+- [x] Remove all `as any` casts
+- [x] Add type guards where needed
+
+```typescript
+// Added type guard using SDK's EventSessionCreated type
+import type { Event, EventSessionCreated } from '@opencode-ai/sdk'
+
+function isSessionCreatedEvent(event: Event): event is EventSessionCreated {
+  return event.type === 'session.created'
+}
+```
 
 ### 3. Reduce Function Size (Medium Priority)
 

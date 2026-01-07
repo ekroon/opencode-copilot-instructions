@@ -1,7 +1,16 @@
 import * as path from 'node:path'
 import type { Plugin } from '@opencode-ai/plugin'
+import type { Event, EventSessionCreated } from '@opencode-ai/sdk'
 import { loadRepoInstructions, loadPathInstructions, type PathInstruction } from './loader'
 import { SessionState } from './session-state'
+
+/**
+ * Type guard to check if an event is a session.created event.
+ * Narrows the Event union type to EventSessionCreated.
+ */
+function isSessionCreatedEvent(event: Event): event is EventSessionCreated {
+  return event.type === 'session.created'
+}
 
 /**
  * Convert an absolute path to a relative path from the given directory.
@@ -90,16 +99,15 @@ export const CopilotInstructionsPlugin: Plugin = async (ctx) => {
       // Log all events for debugging
       log(`Event received: ${event.type}`, 'debug')
       
-      if (event.type === 'session.created') {
+      if (isSessionCreatedEvent(event)) {
         log(`session.created event received, repoInstructions: ${!!repoInstructions}`)
         log(`Event properties: ${JSON.stringify(event.properties)}`, 'debug')
         
         if (repoInstructions) {
-          // Session ID is in event.properties.info.id
-          const sessionId = (event.properties as any)?.info?.id
+          const sessionId = event.properties.info.id
           log(`Extracted sessionId: ${sessionId}`, 'debug')
           
-          if (sessionId && !state.hasRepoInstructions(sessionId)) {
+          if (!state.hasRepoInstructions(sessionId)) {
             state.markRepoInstructionsInjected(sessionId)
             log(`Injecting repo instructions into session ${sessionId}`)
             
@@ -118,8 +126,6 @@ export const CopilotInstructionsPlugin: Plugin = async (ctx) => {
             } catch (err) {
               log(`Failed to inject repo instructions: ${err}`)
             }
-          } else if (!sessionId) {
-            log(`No sessionId found in event.properties`)
           }
         }
       }
