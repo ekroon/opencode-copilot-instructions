@@ -737,6 +737,134 @@ describe.skipIf(!process.env.OPENCODE_E2E)('E2E: Copilot Instructions Plugin', (
       LLM_TIMEOUT * 3
     )
   })
+
+  describe('Compaction', () => {
+    it(
+      'should re-inject instructions after compaction clears state',
+      async () => {
+        // Create TypeScript files for this test
+        fs.writeFileSync(
+          path.join(TEST_DIR, 'compact-test1.ts'),
+          'export const compact1 = 1'
+        )
+        fs.writeFileSync(
+          path.join(TEST_DIR, 'compact-test2.ts'),
+          'export const compact2 = 2'
+        )
+        fs.writeFileSync(
+          path.join(TEST_DIR, 'compact-test3.ts'),
+          'export const compact3 = 3'
+        )
+
+        const file1 = path.join(TEST_DIR, 'compact-test1.ts')
+        const file2 = path.join(TEST_DIR, 'compact-test2.ts')
+        const file3 = path.join(TEST_DIR, 'compact-test3.ts')
+
+        // Step 1: Read first .ts file → instructions should be injected
+        await client.session.prompt({
+          path: { id: sessionId },
+          body: {
+            model: TEST_MODEL,
+            parts: [
+              {
+                type: 'text',
+                text: `Please read the file at ${file1}`
+              }
+            ]
+          }
+        })
+
+        await waitForIdle(client, sessionId)
+
+        // Verify instructions were injected in step 1
+        let messagesResponse = await client.session.messages({
+          path: { id: sessionId }
+        })
+        let messages = messagesResponse.data ?? []
+
+        let markers = countInstructionMarkers(
+          messages,
+          'typescript.instructions.md'
+        )
+        expect(markers.startCount).toBe(1)
+        expect(markers.endCount).toBe(1)
+
+        // Step 2: Read another .ts file → instructions should NOT be injected (deduplication)
+        await client.session.prompt({
+          path: { id: sessionId },
+          body: {
+            model: TEST_MODEL,
+            parts: [
+              {
+                type: 'text',
+                text: `Please read the file at ${file2}`
+              }
+            ]
+          }
+        })
+
+        await waitForIdle(client, sessionId)
+
+        // Verify no new marker was injected (still only 1)
+        messagesResponse = await client.session.messages({
+          path: { id: sessionId }
+        })
+        messages = messagesResponse.data ?? []
+
+        markers = countInstructionMarkers(
+          messages,
+          'typescript.instructions.md'
+        )
+        expect(markers.startCount).toBe(1)
+        expect(markers.endCount).toBe(1)
+
+        // Step 3: Trigger compaction via session.summarize (the compaction API)
+        await client.session.summarize({
+          path: { id: sessionId },
+          body: {
+            providerID: TEST_MODEL.providerID,
+            modelID: TEST_MODEL.modelID
+          }
+        })
+
+        // Step 4: Wait for compaction to complete (session becomes idle)
+        await waitForIdle(client, sessionId)
+
+        // Step 5: Read a third .ts file → instructions SHOULD be re-injected
+        // (compaction clears the injected instructions state)
+        await client.session.prompt({
+          path: { id: sessionId },
+          body: {
+            model: TEST_MODEL,
+            parts: [
+              {
+                type: 'text',
+                text: `Please read the file at ${file3}`
+              }
+            ]
+          }
+        })
+
+        await waitForIdle(client, sessionId)
+
+        // Verify marker was re-injected after compaction
+        messagesResponse = await client.session.messages({
+          path: { id: sessionId }
+        })
+        messages = messagesResponse.data ?? []
+
+        markers = countInstructionMarkers(
+          messages,
+          'typescript.instructions.md'
+        )
+        // After compaction, the old messages are summarized/replaced,
+        // so we should see a fresh injection (1 marker from the post-compaction read)
+        expect(markers.startCount).toBeGreaterThanOrEqual(1)
+        expect(markers.endCount).toBeGreaterThanOrEqual(1)
+      },
+      LLM_TIMEOUT * 3
+    )
+  })
 })
 
 /**

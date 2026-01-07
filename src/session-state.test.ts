@@ -174,4 +174,55 @@ describe('SessionState', () => {
       expect(state.isFileInjected('session-1', '/path/to/file.md')).toBe(true)
     })
   })
+
+  describe('clearSession', () => {
+    it('should clear all file injection state for a session', () => {
+      state.markFileInjected('session-1', '/path/to/file1.md')
+      state.markFileInjected('session-1', '/path/to/file2.md')
+      
+      state.clearSession('session-1')
+      
+      expect(state.isFileInjected('session-1', '/path/to/file1.md')).toBe(false)
+      expect(state.isFileInjected('session-1', '/path/to/file2.md')).toBe(false)
+    })
+
+    it('should clear repo instructions state for a session', () => {
+      state.markRepoInstructionsInjected('session-1')
+      
+      state.clearSession('session-1')
+      
+      expect(state.hasRepoInstructions('session-1')).toBe(false)
+    })
+
+    it('should not affect other sessions', () => {
+      state.markFileInjected('session-1', '/path/to/file.md')
+      state.markFileInjected('session-2', '/path/to/file.md')
+      state.markRepoInstructionsInjected('session-1')
+      state.markRepoInstructionsInjected('session-2')
+      
+      state.clearSession('session-1')
+      
+      // session-1 should be cleared
+      expect(state.isFileInjected('session-1', '/path/to/file.md')).toBe(false)
+      expect(state.hasRepoInstructions('session-1')).toBe(false)
+      
+      // session-2 should be unchanged
+      expect(state.isFileInjected('session-2', '/path/to/file.md')).toBe(true)
+      expect(state.hasRepoInstructions('session-2')).toBe(true)
+    })
+
+    it('should handle clearing non-existent session gracefully', () => {
+      // Should not throw
+      state.clearSession('nonexistent-session')
+    })
+
+    it('should not affect pending instructions (they are per-call, not per-session)', () => {
+      state.setPending('call-1', 'instruction text')
+      
+      state.clearSession('session-1')
+      
+      // Pending instructions should remain (they're keyed by callID, not sessionID)
+      expect(state.getPending('call-1')).toBe('instruction text')
+    })
+  })
 })

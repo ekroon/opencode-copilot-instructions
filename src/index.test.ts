@@ -173,6 +173,131 @@ TS rules.`
     })
   })
 
+  describe('session.compacted event handling', () => {
+    // Helper to simulate the full tool execution flow
+    async function executeToolWithHooks(
+      hooks: any,
+      input: { tool: string; sessionID: string; callID: string },
+      args: any,
+      existingOutput: string = 'File contents here'
+    ) {
+      const beforeOutput = { args } as any
+      await hooks['tool.execute.before']!(input, beforeOutput)
+      
+      const afterOutput = { title: '', output: existingOutput, metadata: {} }
+      await hooks['tool.execute.after']!(input, afterOutput)
+      
+      return { beforeOutput, afterOutput }
+    }
+
+    it('should clear session state when session.compacted event is received', async () => {
+      // Arrange
+      const instructionsDir = path.join(tempDir, '.github', 'instructions')
+      fs.mkdirSync(instructionsDir, { recursive: true })
+      fs.writeFileSync(
+        path.join(instructionsDir, 'typescript.instructions.md'),
+        `---
+applyTo: "**/*.ts"
+---
+TypeScript rules.`
+      )
+
+      const hooks = await CopilotInstructionsPlugin(createPluginInput())
+      const sessionID = 'session-1'
+
+      // First call - inject instructions
+      const { afterOutput: afterOutput1 } = await executeToolWithHooks(
+        hooks,
+        { tool: 'read', sessionID, callID: 'call-1' },
+        { filePath: path.join(tempDir, 'src/index.ts') }
+      )
+      expect(afterOutput1.output).toContain('TypeScript rules.')
+
+      // Second call - should NOT inject (already injected in this session)
+      const { afterOutput: afterOutput2 } = await executeToolWithHooks(
+        hooks,
+        { tool: 'read', sessionID, callID: 'call-2' },
+        { filePath: path.join(tempDir, 'src/other.ts') },
+        'Other file contents'
+      )
+      expect(afterOutput2.output).toBe('Other file contents')
+      expect(afterOutput2.output).not.toContain('TypeScript rules.')
+
+      // Fire session.compacted event
+      await hooks.event!({
+        event: {
+          type: 'session.compacted',
+          properties: { sessionID }
+        }
+      })
+
+      // Third call - should re-inject because state was cleared by compaction
+      const { afterOutput: afterOutput3 } = await executeToolWithHooks(
+        hooks,
+        { tool: 'read', sessionID, callID: 'call-3' },
+        { filePath: path.join(tempDir, 'src/another.ts') }
+      )
+      expect(afterOutput3.output).toContain('TypeScript rules.')
+    })
+
+    it('should not affect other sessions when one session is compacted', async () => {
+      // Arrange
+      const instructionsDir = path.join(tempDir, '.github', 'instructions')
+      fs.mkdirSync(instructionsDir, { recursive: true })
+      fs.writeFileSync(
+        path.join(instructionsDir, 'typescript.instructions.md'),
+        `---
+applyTo: "**/*.ts"
+---
+TypeScript rules.`
+      )
+
+      const hooks = await CopilotInstructionsPlugin(createPluginInput())
+
+      // Session 1 - inject instructions
+      const { afterOutput: session1Output1 } = await executeToolWithHooks(
+        hooks,
+        { tool: 'read', sessionID: 'session-1', callID: 'call-1' },
+        { filePath: path.join(tempDir, 'src/index.ts') }
+      )
+      expect(session1Output1.output).toContain('TypeScript rules.')
+
+      // Session 2 - inject instructions
+      const { afterOutput: session2Output1 } = await executeToolWithHooks(
+        hooks,
+        { tool: 'read', sessionID: 'session-2', callID: 'call-2' },
+        { filePath: path.join(tempDir, 'src/index.ts') }
+      )
+      expect(session2Output1.output).toContain('TypeScript rules.')
+
+      // Fire session.compacted event for session-1 only
+      await hooks.event!({
+        event: {
+          type: 'session.compacted',
+          properties: { sessionID: 'session-1' }
+        }
+      })
+
+      // Session 1 - should re-inject (state was cleared)
+      const { afterOutput: session1Output2 } = await executeToolWithHooks(
+        hooks,
+        { tool: 'read', sessionID: 'session-1', callID: 'call-3' },
+        { filePath: path.join(tempDir, 'src/other.ts') }
+      )
+      expect(session1Output2.output).toContain('TypeScript rules.')
+
+      // Session 2 - should NOT re-inject (state was not cleared)
+      const { afterOutput: session2Output2 } = await executeToolWithHooks(
+        hooks,
+        { tool: 'read', sessionID: 'session-2', callID: 'call-4' },
+        { filePath: path.join(tempDir, 'src/other.ts') },
+        'Session 2 other file'
+      )
+      expect(session2Output2.output).toBe('Session 2 other file')
+      expect(session2Output2.output).not.toContain('TypeScript rules.')
+    })
+  })
+
   describe('tool.execute hooks', () => {
     // Helper to simulate the full tool execution flow
     async function executeToolWithHooks(

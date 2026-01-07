@@ -1,6 +1,6 @@
 import * as path from 'node:path'
 import type { Plugin } from '@opencode-ai/plugin'
-import type { Event, EventSessionCreated } from '@opencode-ai/sdk'
+import type { Event, EventSessionCreated, EventSessionCompacted } from '@opencode-ai/sdk'
 import { loadRepoInstructions, loadPathInstructions, type PathInstruction } from './loader'
 import { SessionState } from './session-state'
 
@@ -10,6 +10,14 @@ import { SessionState } from './session-state'
  */
 function isSessionCreatedEvent(event: Event): event is EventSessionCreated {
   return event.type === 'session.created'
+}
+
+/**
+ * Type guard to check if an event is a session.compacted event.
+ * Narrows the Event union type to EventSessionCompacted.
+ */
+function isSessionCompactedEvent(event: Event): event is EventSessionCompacted {
+  return event.type === 'session.compacted'
 }
 
 /**
@@ -94,7 +102,7 @@ export const CopilotInstructionsPlugin: Plugin = async (ctx) => {
   const state = new SessionState()
 
   return {
-    // Listen for session.created events to inject repo-wide instructions
+    // Listen for session events
     event: async ({ event }) => {
       // Log all events for debugging
       log(`Event received: ${event.type}`, 'debug')
@@ -128,6 +136,14 @@ export const CopilotInstructionsPlugin: Plugin = async (ctx) => {
             }
           }
         }
+      }
+
+      // Clear session state on compaction to allow re-injection
+      if (isSessionCompactedEvent(event)) {
+        const sessionId = event.properties.sessionID
+        log(`session.compacted event received for session ${sessionId}`)
+        state.clearSession(sessionId)
+        log(`Cleared injection state for session ${sessionId}, instructions will be re-injected on next file access`)
       }
     },
 

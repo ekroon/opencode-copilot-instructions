@@ -93,6 +93,16 @@ export class SessionState {
     this.repoInstructionsInjected.add(sessionId)
   }
 
+  /**
+   * Clear all injection state for a session.
+   * Used when a session is compacted to allow re-injection of instructions.
+   * Note: Does not clear pending instructions as they are keyed by callID, not sessionID.
+   */
+  clearSession(sessionId: string): void {
+    this.injectedPerSession.delete(sessionId)
+    this.repoInstructionsInjected.delete(sessionId)
+  }
+
   // --- Pending instructions (tool call lifecycle) ---
 
   /**
