@@ -79,6 +79,23 @@ When modifying plugin behavior in `src/index.ts`:
 - E2E tests run against the compiled `dist/index.js`
 - Always run `npm run build` before running E2E tests
 
+### 4. Manual Testing with OpenCode
+
+When manually testing the plugin with OpenCode, use the `XDG_CONFIG_HOME` override to avoid loading the global config (which may also have the plugin installed, causing duplicate instruction injection):
+
+```bash
+XDG_CONFIG_HOME=/tmp opencode
+```
+
+This ensures only the local project's `opencode.json` is loaded, which references the local build at `dist/index.js`.
+
+To verify the correct config is loaded:
+```bash
+XDG_CONFIG_HOME=/tmp opencode debug config
+```
+
+The `plugin` array should only contain the local file path, not the npm package.
+
 ### Running Tests via Makefile
 
 Use the Makefile for running tests:
