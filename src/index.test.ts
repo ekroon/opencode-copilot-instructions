@@ -135,7 +135,6 @@ TS rules.`
 
       // Assert
       expect(output.context).toHaveLength(1)
-      expect(output.context[0]).toContain('Instructions from: .github/copilot-instructions.md')
       expect(output.context[0]).toContain(repoContent)
     })
 
@@ -171,6 +170,33 @@ TS rules.`
       expect(output.context[0]).toBe('Existing context')
       expect(output.context[1]).toContain('Instructions')
     })
+
+    it('should wrap repo instructions in copilot-instruction tags', async () => {
+      // Arrange
+      const githubDir = path.join(tempDir, '.github')
+      fs.mkdirSync(githubDir, { recursive: true })
+      const repoContent = '# Repo Instructions\n\nFollow these rules.'
+      fs.writeFileSync(path.join(githubDir, 'copilot-instructions.md'), repoContent)
+
+      const hooks = await CopilotInstructionsPlugin(createPluginInput())
+      const input = { sessionID: 'session-1' }
+      const output = { context: [] as string[], prompt: undefined }
+
+      // Act
+      await hooks['experimental.session.compacting']!(input, output)
+
+      // Assert - verify encapsulation tags
+      expect(output.context[0]).toContain('<copilot-instruction:copilot-instructions.md>')
+      expect(output.context[0]).toContain('</copilot-instruction:copilot-instructions.md>')
+
+      // Verify order: start marker → content → end marker
+      const startMarkerIndex = output.context[0].indexOf('<copilot-instruction:copilot-instructions.md>')
+      const contentIndex = output.context[0].indexOf('Follow these rules.')
+      const endMarkerIndex = output.context[0].indexOf('</copilot-instruction:copilot-instructions.md>')
+
+      expect(startMarkerIndex).toBeLessThan(contentIndex)
+      expect(contentIndex).toBeLessThan(endMarkerIndex)
+    })
   })
 
   describe('experimental.chat.system.transform hook', () => {
@@ -190,7 +216,6 @@ TS rules.`
 
       // Assert
       expect(output.system).toHaveLength(1)
-      expect(output.system[0]).toContain('Instructions from: .github/copilot-instructions.md')
       expect(output.system[0]).toContain(repoContent)
     })
 
@@ -225,6 +250,33 @@ TS rules.`
       expect(output.system).toHaveLength(2)
       expect(output.system[0]).toBe('Existing system prompt')
       expect(output.system[1]).toContain('Instructions')
+    })
+
+    it('should wrap repo instructions in copilot-instruction tags', async () => {
+      // Arrange
+      const githubDir = path.join(tempDir, '.github')
+      fs.mkdirSync(githubDir, { recursive: true })
+      const repoContent = '# Repo Instructions\n\nFollow these rules.'
+      fs.writeFileSync(path.join(githubDir, 'copilot-instructions.md'), repoContent)
+
+      const hooks = await CopilotInstructionsPlugin(createPluginInput())
+      const input = { sessionID: 'session-1' }
+      const output = { system: [] as string[] }
+
+      // Act
+      await hooks['experimental.chat.system.transform']!(input, output)
+
+      // Assert - verify encapsulation tags
+      expect(output.system[0]).toContain('<copilot-instruction:copilot-instructions.md>')
+      expect(output.system[0]).toContain('</copilot-instruction:copilot-instructions.md>')
+
+      // Verify order: start marker → content → end marker
+      const startMarkerIndex = output.system[0].indexOf('<copilot-instruction:copilot-instructions.md>')
+      const contentIndex = output.system[0].indexOf('Follow these rules.')
+      const endMarkerIndex = output.system[0].indexOf('</copilot-instruction:copilot-instructions.md>')
+
+      expect(startMarkerIndex).toBeLessThan(contentIndex)
+      expect(contentIndex).toBeLessThan(endMarkerIndex)
     })
   })
 

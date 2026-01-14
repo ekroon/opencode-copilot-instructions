@@ -111,14 +111,14 @@ export const CopilotInstructionsPlugin: Plugin = async (ctx) => {
     // Inject repo-wide instructions into the system prompt on every LLM call
     'experimental.chat.system.transform': async (_input, output) => {
       if (repoInstructions) {
-        output.system.push(`Instructions from: .github/copilot-instructions.md\n${repoInstructions}`)
+        output.system.push(`<copilot-instruction:copilot-instructions.md>\n${repoInstructions.trimEnd()}\n</copilot-instruction:copilot-instructions.md>`)
       }
     },
 
     // Preserve repo-wide instructions during compaction
     'experimental.session.compacting': async (_input, output) => {
       if (repoInstructions) {
-        output.context.push(`Instructions from: .github/copilot-instructions.md\n${repoInstructions}`)
+        output.context.push(`<copilot-instruction:copilot-instructions.md>\n${repoInstructions.trimEnd()}\n</copilot-instruction:copilot-instructions.md>`)
       }
     },
 
