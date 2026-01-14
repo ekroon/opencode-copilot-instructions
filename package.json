@@ -22,11 +22,11 @@
   ],
   "scripts": {
     "build": "tsc",
-    "test": "vitest run --exclude src/e2e.test.ts",
-    "test:watch": "vitest --exclude src/e2e.test.ts",
-    "test:e2e": "vitest run src/e2e.test.ts",
-    "test:e2e:full": "OPENCODE_E2E=true vitest run src/e2e.test.ts",
-    "test:all": "vitest run"
+    "test": "vitest run --exclude src/e2e.test.ts --exclude '.vendor/**'",
+    "test:watch": "vitest --exclude src/e2e.test.ts --exclude '.vendor/**'",
+    "test:e2e": "vitest run src/e2e.test.ts --exclude '.vendor/**'",
+    "test:e2e:full": "OPENCODE_E2E=true vitest run src/e2e.test.ts --exclude '.vendor/**'",
+    "test:all": "vitest run --exclude '.vendor/**'"
   },
   "dependencies": {
     "front-matter": "^4.0.2",

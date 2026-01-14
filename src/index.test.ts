@@ -135,7 +135,7 @@ TS rules.`
 
       // Assert
       expect(output.context).toHaveLength(1)
-      expect(output.context[0]).toContain('## Copilot Custom Instructions')
+      expect(output.context[0]).toContain('Instructions from: .github/copilot-instructions.md')
       expect(output.context[0]).toContain(repoContent)
     })
 
@@ -170,6 +170,61 @@ TS rules.`
       expect(output.context).toHaveLength(2)
       expect(output.context[0]).toBe('Existing context')
       expect(output.context[1]).toContain('Instructions')
+    })
+  })
+
+  describe('experimental.chat.system.transform hook', () => {
+    it('should inject repo-wide instructions into system prompt', async () => {
+      // Arrange
+      const githubDir = path.join(tempDir, '.github')
+      fs.mkdirSync(githubDir, { recursive: true })
+      const repoContent = '# Repo Instructions\n\nFollow these rules.'
+      fs.writeFileSync(path.join(githubDir, 'copilot-instructions.md'), repoContent)
+
+      const hooks = await CopilotInstructionsPlugin(createPluginInput())
+      const input = { sessionID: 'session-1' }
+      const output = { system: [] as string[] }
+
+      // Act
+      await hooks['experimental.chat.system.transform']!(input, output)
+
+      // Assert
+      expect(output.system).toHaveLength(1)
+      expect(output.system[0]).toContain('Instructions from: .github/copilot-instructions.md')
+      expect(output.system[0]).toContain(repoContent)
+    })
+
+    it('should not inject anything when no repo instructions exist', async () => {
+      // Arrange - no .github directory
+
+      const hooks = await CopilotInstructionsPlugin(createPluginInput())
+      const input = { sessionID: 'session-1' }
+      const output = { system: [] as string[] }
+
+      // Act
+      await hooks['experimental.chat.system.transform']!(input, output)
+
+      // Assert
+      expect(output.system).toHaveLength(0)
+    })
+
+    it('should preserve existing system entries', async () => {
+      // Arrange
+      const githubDir = path.join(tempDir, '.github')
+      fs.mkdirSync(githubDir, { recursive: true })
+      fs.writeFileSync(path.join(githubDir, 'copilot-instructions.md'), 'Instructions')
+
+      const hooks = await CopilotInstructionsPlugin(createPluginInput())
+      const input = { sessionID: 'session-1' }
+      const output = { system: ['Existing system prompt'] }
+
+      // Act
+      await hooks['experimental.chat.system.transform']!(input, output)
+
+      // Assert
+      expect(output.system).toHaveLength(2)
+      expect(output.system[0]).toBe('Existing system prompt')
+      expect(output.system[1]).toContain('Instructions')
     })
   })
 

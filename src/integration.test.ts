@@ -132,7 +132,7 @@ export function Button({ children }: { children: React.ReactNode }) {
 
       // Assert
       expect(output.context).toHaveLength(1)
-      expect(output.context[0]).toContain('## Copilot Custom Instructions')
+      expect(output.context[0]).toContain('Instructions from: .github/copilot-instructions.md')
       expect(output.context[0]).toContain('Repository Guidelines')
       expect(output.context[0]).toContain('Use strict mode')
     })

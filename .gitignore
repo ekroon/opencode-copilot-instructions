@@ -6,3 +6,6 @@ dist/
 # E2E test artifacts
 .e2e-test-*/
 e2e-export.json
+
+# Vendor directory for source code analysis
+.vendor/

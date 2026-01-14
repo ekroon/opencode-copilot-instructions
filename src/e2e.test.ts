@@ -222,10 +222,29 @@ describe.skipIf(!process.env.OPENCODE_E2E)('E2E: Copilot Instructions Plugin', (
 
   describe('Repo-wide Instructions', () => {
     it(
-      'should inject repo instructions on session creation',
+      'should inject repo instructions into system prompt',
       async () => {
-        // Wait a bit for the session.created event to fire and instructions to be injected
-        await new Promise((resolve) => setTimeout(resolve, 2000))
+        // Repo instructions are now injected via experimental.chat.system.transform
+        // into the system prompt, not via user messages. We can't directly access
+        // the system prompt via SDK, so we verify by asking the LLM a question
+        // that would only be answerable if it has the repo instructions.
+
+        // Send a prompt asking about the marker from the repo instructions
+        await client.session.prompt({
+          path: { id: sessionId },
+          body: {
+            model: TEST_MODEL,
+            parts: [
+              {
+                type: 'text',
+                text: 'What is the E2E_REPO_MARKER mentioned in your instructions? Please include it in your response.'
+              }
+            ]
+          }
+        })
+
+        // Wait for the session to become idle
+        await waitForIdle(client, sessionId)
 
         // Get all messages in the session
         const messagesResponse = await client.session.messages({
@@ -234,18 +253,20 @@ describe.skipIf(!process.env.OPENCODE_E2E)('E2E: Copilot Instructions Plugin', (
 
         const messages = messagesResponse.data ?? []
 
-        // Find a message containing the repo instructions
-        const hasRepoInstructions = messages.some((msg) =>
-          msg.parts.some((part) => {
-            if (part.type === 'text') {
-              const textPart = part as { type: 'text'; text: string }
-              return textPart.text.includes('E2E_REPO_MARKER_12345')
-            }
-            return false
-          })
+        // Find the assistant's response and check if it mentions the marker
+        const assistantResponse = messages.find(
+          (msg) => msg.info.role === 'assistant'
         )
 
-        expect(hasRepoInstructions).toBe(true)
+        expect(assistantResponse).toBeDefined()
+
+        // Check if the assistant's response contains the marker
+        const responseText = assistantResponse?.parts
+          .filter((p) => p.type === 'text')
+          .map((p) => (p as { type: 'text'; text: string }).text)
+          .join('')
+
+        expect(responseText).toContain('E2E_REPO_MARKER_12345')
       },
       LLM_TIMEOUT
     )

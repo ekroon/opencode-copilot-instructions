@@ -97,24 +97,6 @@ describe('SessionState', () => {
     })
   })
 
-  describe('repo instruction tracking', () => {
-    it('should return false for sessions without repo instructions', () => {
-      expect(state.hasRepoInstructions('session-1')).toBe(false)
-    })
-
-    it('should return true after marking repo instructions injected', () => {
-      state.markRepoInstructionsInjected('session-1')
-      expect(state.hasRepoInstructions('session-1')).toBe(true)
-    })
-
-    it('should track repo instructions per session independently', () => {
-      state.markRepoInstructionsInjected('session-1')
-      
-      expect(state.hasRepoInstructions('session-1')).toBe(true)
-      expect(state.hasRepoInstructions('session-2')).toBe(false)
-    })
-  })
-
   describe('pending instructions', () => {
     it('should return undefined for non-existent call', () => {
       expect(state.getPending('call-1')).toBeUndefined()
@@ -186,29 +168,17 @@ describe('SessionState', () => {
       expect(state.isFileInjected('session-1', '/path/to/file2.md')).toBe(false)
     })
 
-    it('should clear repo instructions state for a session', () => {
-      state.markRepoInstructionsInjected('session-1')
-      
-      state.clearSession('session-1')
-      
-      expect(state.hasRepoInstructions('session-1')).toBe(false)
-    })
-
     it('should not affect other sessions', () => {
       state.markFileInjected('session-1', '/path/to/file.md')
       state.markFileInjected('session-2', '/path/to/file.md')
-      state.markRepoInstructionsInjected('session-1')
-      state.markRepoInstructionsInjected('session-2')
       
       state.clearSession('session-1')
       
       // session-1 should be cleared
       expect(state.isFileInjected('session-1', '/path/to/file.md')).toBe(false)
-      expect(state.hasRepoInstructions('session-1')).toBe(false)
       
       // session-2 should be unchanged
       expect(state.isFileInjected('session-2', '/path/to/file.md')).toBe(true)
-      expect(state.hasRepoInstructions('session-2')).toBe(true)
     })
 
     it('should handle clearing non-existent session gracefully', () => {

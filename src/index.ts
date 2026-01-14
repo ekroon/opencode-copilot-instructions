@@ -1,16 +1,8 @@
 import * as path from 'node:path'
 import type { Plugin } from '@opencode-ai/plugin'
-import type { Event, EventSessionCreated, EventSessionCompacted } from '@opencode-ai/sdk'
+import type { Event, EventSessionCompacted } from '@opencode-ai/sdk'
 import { loadRepoInstructions, loadPathInstructions, type PathInstruction } from './loader'
 import { SessionState } from './session-state'
-
-/**
- * Type guard to check if an event is a session.created event.
- * Narrows the Event union type to EventSessionCreated.
- */
-function isSessionCreatedEvent(event: Event): event is EventSessionCreated {
-  return event.type === 'session.created'
-}
 
 /**
  * Type guard to check if an event is a session.compacted event.
@@ -106,51 +98,27 @@ export const CopilotInstructionsPlugin: Plugin = async (ctx) => {
     event: async ({ event }) => {
       // Log all events for debugging
       log(`Event received: ${event.type}`, 'debug')
-      
-      if (isSessionCreatedEvent(event)) {
-        log(`session.created event received, repoInstructions: ${!!repoInstructions}`)
-        log(`Event properties: ${JSON.stringify(event.properties)}`, 'debug')
-        
-        if (repoInstructions) {
-          const sessionId = event.properties.info.id
-          log(`Extracted sessionId: ${sessionId}`, 'debug')
-          
-          if (!state.hasRepoInstructions(sessionId)) {
-            state.markRepoInstructionsInjected(sessionId)
-            log(`Injecting repo instructions into session ${sessionId}`)
-            
-            try {
-              await client.session.prompt({
-                path: { id: sessionId },
-                body: {
-                  noReply: true,
-                  parts: [{
-                    type: 'text',
-                    text: `## Copilot Custom Instructions\n\n${repoInstructions}`
-                  }]
-                }
-              })
-              log(`Successfully injected repo instructions into session ${sessionId}`)
-            } catch (err) {
-              log(`Failed to inject repo instructions: ${err}`)
-            }
-          }
-        }
-      }
 
-      // Clear session state on compaction to allow re-injection
+      // Clear path-specific injection state on compaction to allow re-injection
       if (isSessionCompactedEvent(event)) {
         const sessionId = event.properties.sessionID
         log(`session.compacted event received for session ${sessionId}`)
         state.clearSession(sessionId)
-        log(`Cleared injection state for session ${sessionId}, instructions will be re-injected on next file access`)
+        log(`Cleared path-specific injection state for session ${sessionId}, instructions will be re-injected on next file access`)
+      }
+    },
+
+    // Inject repo-wide instructions into the system prompt on every LLM call
+    'experimental.chat.system.transform': async (_input, output) => {
+      if (repoInstructions) {
+        output.system.push(`Instructions from: .github/copilot-instructions.md\n${repoInstructions}`)
       }
     },
 
     // Preserve repo-wide instructions during compaction
     'experimental.session.compacting': async (_input, output) => {
       if (repoInstructions) {
-        output.context.push(`## Copilot Custom Instructions\n\n${repoInstructions}`)
+        output.context.push(`Instructions from: .github/copilot-instructions.md\n${repoInstructions}`)
       }
     },
 
@@ -232,9 +200,7 @@ export const CopilotInstructionsPlugin: Plugin = async (ctx) => {
 
       // Sync injection state with actual markers in message history
       // This enables re-injection after undo operations
-      const clearedFiles: string[] = []
       state.syncWithMarkers(presentMarkers)
-      // Note: logging of cleared files now handled internally by SessionState
     }
   }
 }

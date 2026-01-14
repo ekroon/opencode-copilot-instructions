@@ -3,18 +3,14 @@ import * as path from 'node:path'
 /**
  * Encapsulates all session-related state for the Copilot Instructions plugin.
  * 
- * Manages three types of state:
+ * Manages two types of state:
  * 1. Path instruction injection tracking (with undo support via marker sync)
- * 2. Repo instruction injection tracking (one-time per session)
- * 3. Pending instructions for tool call lifecycle (ephemeral)
+ * 2. Pending instructions for tool call lifecycle (ephemeral)
  */
 export class SessionState {
   // Track which instruction files have been injected per session
   // Map<sessionID, Set<instructionFilePath>>
   private injectedPerSession = new Map<string, Set<string>>()
-
-  // Track sessions where repo-wide instructions have been injected
-  private repoInstructionsInjected = new Set<string>()
 
   // Track pending instructions to inject per tool call (ephemeral)
   // Map<callID, instructionText>
@@ -77,30 +73,13 @@ export class SessionState {
     }
   }
 
-  // --- Repo instruction tracking ---
-
   /**
-   * Check if repo instructions have been injected for a session.
-   */
-  hasRepoInstructions(sessionId: string): boolean {
-    return this.repoInstructionsInjected.has(sessionId)
-  }
-
-  /**
-   * Mark repo instructions as injected for a session.
-   */
-  markRepoInstructionsInjected(sessionId: string): void {
-    this.repoInstructionsInjected.add(sessionId)
-  }
-
-  /**
-   * Clear all injection state for a session.
+   * Clear path-specific injection state for a session.
    * Used when a session is compacted to allow re-injection of instructions.
    * Note: Does not clear pending instructions as they are keyed by callID, not sessionID.
    */
   clearSession(sessionId: string): void {
     this.injectedPerSession.delete(sessionId)
-    this.repoInstructionsInjected.delete(sessionId)
   }
 
   // --- Pending instructions (tool call lifecycle) ---
