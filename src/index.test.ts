@@ -405,6 +405,77 @@ TypeScript rules.`
     })
   })
 
+  describe('repo-wide instructions persistence', () => {
+    it('should still inject repo-wide instructions after session.compacted event', async () => {
+      // Arrange
+      const githubDir = path.join(tempDir, '.github')
+      fs.mkdirSync(githubDir, { recursive: true })
+      const repoContent = '# Repo Instructions\n\nFollow these rules.'
+      fs.writeFileSync(path.join(githubDir, 'copilot-instructions.md'), repoContent)
+
+      const hooks = await CopilotInstructionsPlugin(createPluginInput())
+      const sessionID = 'session-1'
+
+      // Act - First experimental.chat.system.transform call
+      const output1 = { system: [] as string[] }
+      await hooks['experimental.chat.system.transform']!({ sessionID }, output1)
+
+      // Assert - verify instructions are in output.system
+      expect(output1.system).toHaveLength(1)
+      expect(output1.system[0]).toContain(repoContent)
+      const firstCallContent = output1.system[0]
+
+      // Act - Fire session.compacted event
+      await hooks.event!({
+        event: {
+          type: 'session.compacted',
+          properties: { sessionID }
+        }
+      })
+
+      // Act - Second experimental.chat.system.transform call
+      const output2 = { system: [] as string[] }
+      await hooks['experimental.chat.system.transform']!({ sessionID }, output2)
+
+      // Assert - verify instructions are STILL in output.system
+      expect(output2.system).toHaveLength(1)
+      expect(output2.system[0]).toContain(repoContent)
+
+      // Assert - verify the content is identical (not duplicated)
+      expect(output2.system[0]).toBe(firstCallContent)
+    })
+
+    it('should still inject repo-wide instructions after undo operation', async () => {
+      // Arrange
+      const githubDir = path.join(tempDir, '.github')
+      fs.mkdirSync(githubDir, { recursive: true })
+      const repoContent = '# Repo Instructions\n\nFollow these rules.'
+      fs.writeFileSync(path.join(githubDir, 'copilot-instructions.md'), repoContent)
+
+      const hooks = await CopilotInstructionsPlugin(createPluginInput())
+
+      // Act - First experimental.chat.system.transform call
+      const output1 = { system: [] as string[] }
+      await hooks['experimental.chat.system.transform']!({ sessionID: 'session-1' }, output1)
+
+      // Assert - verify instructions are in output.system
+      expect(output1.system).toHaveLength(1)
+      expect(output1.system[0]).toContain(repoContent)
+
+      // Act - Simulate /undo by calling experimental.chat.messages.transform with empty messages
+      const messagesOutput = { messages: [] as any[] }
+      await hooks['experimental.chat.messages.transform']!({}, messagesOutput)
+
+      // Act - Second experimental.chat.system.transform call
+      const output2 = { system: [] as string[] }
+      await hooks['experimental.chat.system.transform']!({ sessionID: 'session-1' }, output2)
+
+      // Assert - verify instructions are STILL in output.system
+      expect(output2.system).toHaveLength(1)
+      expect(output2.system[0]).toContain(repoContent)
+    })
+  })
+
   describe('tool.execute hooks', () => {
     // Helper to simulate the full tool execution flow
     async function executeToolWithHooks(
@@ -949,6 +1020,74 @@ TypeScript rules.`
         'Other file contents'
       )
       expect(afterOutput2.output).toBe('Other file contents')
+    })
+
+    it('should re-inject path instructions after multiple consecutive undos', async () => {
+      // Arrange
+      const instructionsDir = path.join(tempDir, '.github', 'instructions')
+      fs.mkdirSync(instructionsDir, { recursive: true })
+      fs.writeFileSync(
+        path.join(instructionsDir, 'typescript.instructions.md'),
+        `---
+applyTo: "**/*.ts"
+---
+TypeScript rules.`
+      )
+
+      const hooks = await CopilotInstructionsPlugin(createPluginInput())
+      const sessionID = 'session-1'
+
+      // First file access - instruction should be injected
+      const { afterOutput: afterOutput1 } = await executeToolWithHooks(
+        hooks,
+        { tool: 'read', sessionID, callID: 'call-1' },
+        { filePath: path.join(tempDir, 'src/file1.ts') }
+      )
+      expect(afterOutput1.output).toContain('TypeScript rules.')
+
+      // Second file access - instruction should NOT be injected (already tracked)
+      const { afterOutput: afterOutput2 } = await executeToolWithHooks(
+        hooks,
+        { tool: 'read', sessionID, callID: 'call-2' },
+        { filePath: path.join(tempDir, 'src/file2.ts') },
+        'File 2 contents'
+      )
+      expect(afterOutput2.output).toBe('File 2 contents')
+      expect(afterOutput2.output).not.toContain('TypeScript rules.')
+
+      // First /undo simulation - call messages transform with empty messages
+      const messagesOutput1 = { messages: [] as any[] }
+      await hooks['experimental.chat.messages.transform']!({}, messagesOutput1)
+
+      // Third file access - instruction should be re-injected
+      const { afterOutput: afterOutput3 } = await executeToolWithHooks(
+        hooks,
+        { tool: 'read', sessionID, callID: 'call-3' },
+        { filePath: path.join(tempDir, 'src/file3.ts') }
+      )
+      expect(afterOutput3.output).toContain('TypeScript rules.')
+
+      // Fourth file access - instruction should NOT be injected (already tracked again)
+      const { afterOutput: afterOutput4 } = await executeToolWithHooks(
+        hooks,
+        { tool: 'read', sessionID, callID: 'call-4' },
+        { filePath: path.join(tempDir, 'src/file4.ts') },
+        'File 4 contents'
+      )
+      expect(afterOutput4.output).toBe('File 4 contents')
+      expect(afterOutput4.output).not.toContain('TypeScript rules.')
+
+      // Second /undo simulation - call messages transform with empty messages
+      const messagesOutput2 = { messages: [] as any[] }
+      await hooks['experimental.chat.messages.transform']!({}, messagesOutput2)
+
+      // Fifth file access - instruction should be re-injected
+      const { afterOutput: afterOutput5 } = await executeToolWithHooks(
+        hooks,
+        { tool: 'read', sessionID, callID: 'call-5' },
+        { filePath: path.join(tempDir, 'src/file5.ts') }
+      )
+      expect(afterOutput5.output).toContain('TypeScript rules.')
     })
   })
 })
