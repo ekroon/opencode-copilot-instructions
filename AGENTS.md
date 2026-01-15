@@ -73,13 +73,55 @@ Follow this sequence to ensure proper dependency management:
 
 Each module should be fully tested before moving to the next.
 
-### 3. E2E Tests Require Rebuild
+### 3. Test Types and Running Tests
+
+This project has **2 types of tests**:
+
+| Type | Location | Description | Requirements |
+|------|----------|-------------|--------------|
+| **Unit tests** | `src/*.test.ts` (except e2e) | Fast tests, no external deps | None |
+| **E2E tests** | `src/e2e.test.ts` | Full integration with OpenCode | API keys configured |
+
+#### Running Tests via Makefile
+
+| Command | Description | Expected Output |
+|---------|-------------|-----------------|
+| `make test` | Build + run unit tests | ~140 tests pass |
+| `make test-unit` | Run unit tests only (no build) | ~140 tests pass |
+| `make test-e2e` | Build + run E2E tests | 9 pass |
+| `make test-all` | Build + unit + E2E tests | All tests pass |
+
+**When asked to "run E2E tests"**, use `make test-e2e`. This runs the full E2E test suite with real LLM calls.
+
+**When asked to "run all tests"**, use `make test-all`. This runs both unit and E2E tests.
+
+#### E2E Test Details
+
+The E2E tests in `src/e2e.test.ts` include:
+- **Repo-wide instructions** - verifies system prompt injection
+- **Path-specific instructions** - verifies tool output injection
+- **Deduplication** - verifies instructions only inject once per session
+- **Undo/Revert flow** - verifies re-injection after undo
+- **Compaction** - verifies re-injection after session compaction
+
+E2E tests require:
+- OpenCode installed
+- API keys configured (uses `github-copilot` provider with `claude-haiku-4.5`)
+- Plugin built (`dist/index.js` must exist)
+
+#### Why E2E Tests Show "Skipped"
+
+- `make test-all` runs tests twice: once without `OPENCODE_E2E=true` (E2E skipped), once with it (E2E runs)
+- Expected: "9 passed" for `make test-e2e`
+
+### 4. E2E Tests Require Rebuild
 
 When modifying plugin behavior in `src/index.ts`:
 - E2E tests run against the compiled `dist/index.js`
 - Always run `npm run build` before running E2E tests
+- The Makefile targets handle this automatically
 
-### 4. Manual Testing with OpenCode
+### 5. Manual Testing with OpenCode
 
 When manually testing the plugin with OpenCode, use the `XDG_CONFIG_HOME` override to avoid loading the global config (which may also have the plugin installed, causing duplicate instruction injection):
 
@@ -95,16 +137,3 @@ XDG_CONFIG_HOME=/tmp opencode debug config
 ```
 
 The `plugin` array should only contain the local file path, not the npm package.
-
-### Running Tests via Makefile
-
-Use the Makefile for running tests:
-
-| Command | Description |
-|---------|-------------|
-| `make test` | Build + run unit tests |
-| `make test-unit` | Run unit tests only (no build) |
-| `make test-e2e` | Build + run E2E tests |
-| `make test-all` | Build + run unit tests + E2E tests |
-
-Always run `make test-all` before completing any refactor to ensure both unit and E2E tests pass.
