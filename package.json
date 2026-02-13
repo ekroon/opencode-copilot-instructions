@@ -30,6 +30,7 @@
   },
   "dependencies": {
     "front-matter": "^4.0.2",
+    "js-tiktoken": "^1.0.21",
     "picomatch": "^4.0.0"
   },
   "peerDependencies": {

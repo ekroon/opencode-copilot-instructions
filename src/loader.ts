@@ -2,25 +2,36 @@ import * as fs from 'node:fs'
 import * as path from 'node:path'
 import { parseFrontmatter } from './frontmatter'
 import { createMatcher, normalizePatterns, type Matcher } from './matcher'
+import { countTokens } from './tokens'
 
 export interface PathInstruction {
-  file: string           // Original file path
-  applyTo: string[]      // Glob patterns from frontmatter
-  content: string        // Instruction content (without frontmatter)
-  matcher: Matcher       // Compiled glob matcher function
+  file: string
+  applyTo: string[]
+  content: string
+  matcher: Matcher
+  tokenCount: number
+}
+
+export interface RepoInstruction {
+  content: string
+  tokenCount: number
 }
 
 /**
  * Load repository-wide Copilot instructions from .github/copilot-instructions.md
  *
  * @param directory - The root directory to search in
- * @returns The file content as a string if found, null otherwise
+ * @returns A RepoInstruction with content and token count if found, null otherwise
  */
-export function loadRepoInstructions(directory: string): string | null {
+export function loadRepoInstructions(directory: string): RepoInstruction | null {
   const filePath = path.join(directory, '.github', 'copilot-instructions.md')
 
   try {
-    return fs.readFileSync(filePath, 'utf-8')
+    const content = fs.readFileSync(filePath, 'utf-8')
+    return {
+      content,
+      tokenCount: countTokens(content)
+    }
   } catch {
     return null
   }
@@ -71,7 +82,8 @@ export function loadPathInstructions(directory: string): PathInstruction[] {
       file: filePath,
       applyTo: patterns,
       content: parsed.body,
-      matcher: createMatcher(patterns)
+      matcher: createMatcher(patterns),
+      tokenCount: countTokens(parsed.body)
     })
   }
 
