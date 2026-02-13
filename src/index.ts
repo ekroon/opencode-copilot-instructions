@@ -94,6 +94,7 @@ export const CopilotInstructionsPlugin: Plugin = async (ctx) => {
   const state = new SessionState()
 
   return {
+
     // Listen for session events
     event: async ({ event }) => {
       // Log all events for debugging
@@ -163,17 +164,26 @@ export const CopilotInstructionsPlugin: Plugin = async (ctx) => {
           })
           .join('\n\n')
 
-        state.setPending(input.callID, instructionText)
+        const loadedFiles = matchingInstructions.map(i => i.file)
+        state.setPending(input.callID, instructionText, loadedFiles)
         log(`Queued ${matchingInstructions.length} path instructions for ${relativePath}`, 'debug')
       }
     },
 
     'tool.execute.after': async (input, output) => {
-      // Check if we have pending instructions for this tool call
-      const instructionText = state.consumePending(input.callID)
-      if (instructionText) {
-        // Append instructions to the tool output
-        output.output = `${output.output}\n\n${instructionText}`
+      const pending = state.consumePending(input.callID)
+      if (pending) {
+        output.output = `${output.output}\n\n${pending.text}`
+
+        const pathCount = pending.loadedFiles.length
+        if (pathCount > 0) {
+          const existing = (output.metadata as Record<string, unknown>)?.loaded
+          const existingArray = Array.isArray(existing) ? existing : []
+          const totalCount = pathCount + (repoInstructions ? 1 : 0)
+          const summary = `Total: ${totalCount} instruction${totalCount > 1 ? 's' : ''} active`
+          ;(output.metadata as Record<string, unknown>).loaded = [...existingArray, ...pending.loadedFiles, summary]
+        }
+
         log(`Injected path instructions for call ${input.callID}`, 'debug')
       }
     },

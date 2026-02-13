@@ -13,8 +13,8 @@ export class SessionState {
   private injectedPerSession = new Map<string, Set<string>>()
 
   // Track pending instructions to inject per tool call (ephemeral)
-  // Map<callID, instructionText>
-  private pendingInstructions = new Map<string, string>()
+  // Map<callID, { text: string, loadedFiles: string[] }>
+  private pendingInstructions = new Map<string, { text: string; loadedFiles: string[] }>()
 
   // --- Path instruction tracking ---
 
@@ -87,26 +87,27 @@ export class SessionState {
   /**
    * Store pending instructions to inject after a tool call completes.
    */
-  setPending(callId: string, text: string): void {
-    this.pendingInstructions.set(callId, text)
+  setPending(callId: string, text: string, loadedFiles: string[] = []): void {
+    this.pendingInstructions.set(callId, { text, loadedFiles })
   }
 
   /**
    * Get pending instructions for a tool call without consuming them.
    */
   getPending(callId: string): string | undefined {
-    return this.pendingInstructions.get(callId)
+    return this.pendingInstructions.get(callId)?.text
   }
 
   /**
    * Consume and return pending instructions for a tool call.
    * The instructions are deleted after retrieval.
+   * Returns both the instruction text and the loaded file paths.
    */
-  consumePending(callId: string): string | undefined {
-    const text = this.pendingInstructions.get(callId)
-    if (text !== undefined) {
+  consumePending(callId: string): { text: string; loadedFiles: string[] } | undefined {
+    const entry = this.pendingInstructions.get(callId)
+    if (entry !== undefined) {
       this.pendingInstructions.delete(callId)
     }
-    return text
+    return entry
   }
 }

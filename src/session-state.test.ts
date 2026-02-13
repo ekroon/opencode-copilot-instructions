@@ -115,17 +115,34 @@ describe('SessionState', () => {
       expect(state.getPending('call-2')).toBe('instruction 2')
     })
 
-    it('should consume and clear pending instructions', () => {
+    it('should consume and return text and loadedFiles together', () => {
+      state.setPending('call-1', 'instruction text', ['/path/to/file.md'])
+      
+      const result = state.consumePending('call-1')
+      
+      expect(result).toEqual({ text: 'instruction text', loadedFiles: ['/path/to/file.md'] })
+      expect(state.getPending('call-1')).toBeUndefined()
+    })
+
+    it('should return empty loadedFiles when none provided', () => {
       state.setPending('call-1', 'instruction text')
       
       const result = state.consumePending('call-1')
       
-      expect(result).toBe('instruction text')
-      expect(state.getPending('call-1')).toBeUndefined()
+      expect(result).toEqual({ text: 'instruction text', loadedFiles: [] })
     })
 
     it('should return undefined when consuming non-existent call', () => {
       expect(state.consumePending('nonexistent')).toBeUndefined()
+    })
+
+    it('should store multiple loadedFiles', () => {
+      const files = ['/path/to/file1.md', '/path/to/file2.md']
+      state.setPending('call-1', 'instruction text', files)
+      
+      const result = state.consumePending('call-1')
+      
+      expect(result?.loadedFiles).toEqual(files)
     })
   })
 

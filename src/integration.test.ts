@@ -17,6 +17,9 @@ describe('Integration Tests', () => {
         log: vi.fn((options: { body: { service: string; level: string; message: string } }) => {
           logMessages.push(options.body.message)
         })
+      },
+      tui: {
+        showToast: vi.fn()
       }
     }
   })
