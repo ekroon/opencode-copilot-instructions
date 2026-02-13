@@ -8,6 +8,8 @@ import { CopilotInstructionsPlugin } from './index'
 // to avoid OpenCode treating it as a plugin. It is tested indirectly
 // through the tool.execute.before hook tests which use various path formats.
 
+const mockModel = { providerID: 'test', modelID: 'test-model', limit: { context: 200000, output: 16000 } } as any
+
 describe('CopilotInstructionsPlugin', () => {
   let tempDir: string
   let mockClient: any
@@ -55,7 +57,7 @@ describe('CopilotInstructionsPlugin', () => {
 
       // Assert
       expect(mockClient.app.log).toHaveBeenCalled()
-      expect(logMessages.some(msg => msg.includes('copilot-instructions.md'))).toBe(true)
+      expect(logMessages.some(msg => msg.includes('copilot-instructions.md') && msg.includes('tokens'))).toBe(true)
     })
 
     it('should load and log path-specific instructions', async () => {
@@ -75,7 +77,7 @@ Use TypeScript strict mode.`
 
       // Assert
       expect(mockClient.app.log).toHaveBeenCalled()
-      expect(logMessages.some(msg => msg.includes('typescript.instructions.md'))).toBe(true)
+      expect(logMessages.some(msg => msg.includes('typescript.instructions.md') && msg.includes('tokens'))).toBe(true)
     })
 
     it('should handle no instructions gracefully', async () => {
@@ -115,6 +117,164 @@ TS rules.`
       expect(mockClient.app.log).toHaveBeenCalled()
       expect(logMessages.some(msg => msg.includes('copilot-instructions.md'))).toBe(true)
       expect(logMessages.some(msg => msg.includes('ts.instructions.md'))).toBe(true)
+    })
+
+    it('should log total instruction tokens on startup', async () => {
+      // Arrange
+      const githubDir = path.join(tempDir, '.github')
+      const instructionsDir = path.join(githubDir, 'instructions')
+      fs.mkdirSync(instructionsDir, { recursive: true })
+
+      fs.writeFileSync(
+        path.join(githubDir, 'copilot-instructions.md'),
+        '# Repo Instructions\n\nFollow these rules.'
+      )
+      fs.writeFileSync(
+        path.join(instructionsDir, 'typescript.instructions.md'),
+        `---
+applyTo: "**/*.ts"
+---
+TypeScript rules.`
+      )
+
+      // Act
+      await CopilotInstructionsPlugin(createPluginInput())
+
+      // Assert
+      expect(logMessages.some(msg => msg.includes('Total instruction tokens:') && msg.includes('k'))).toBe(true)
+    })
+  })
+
+  describe('context percentage logging', () => {
+    it('should log context percentage on first system.transform call', async () => {
+      // Arrange
+      const githubDir = path.join(tempDir, '.github')
+      fs.mkdirSync(githubDir, { recursive: true })
+      fs.writeFileSync(
+        path.join(githubDir, 'copilot-instructions.md'),
+        '# Repo Instructions\n\nFollow these rules.'
+      )
+
+      const hooks = await CopilotInstructionsPlugin(createPluginInput())
+      const output = { system: [] as string[] }
+
+      // Act
+      await hooks['experimental.chat.system.transform']!({ sessionID: 'session-1', model: mockModel }, output)
+
+      // Assert
+      expect(logMessages.some(msg => msg.includes('Instructions:') && msg.includes('%') && msg.includes('context'))).toBe(true)
+    })
+
+    it('should NOT log context percentage on second system.transform call for same session', async () => {
+      // Arrange
+      const githubDir = path.join(tempDir, '.github')
+      fs.mkdirSync(githubDir, { recursive: true })
+      fs.writeFileSync(
+        path.join(githubDir, 'copilot-instructions.md'),
+        '# Repo Instructions\n\nFollow these rules.'
+      )
+
+      const hooks = await CopilotInstructionsPlugin(createPluginInput())
+      const sessionID = 'session-1'
+
+      // Act
+      await hooks['experimental.chat.system.transform']!({ sessionID, model: mockModel }, { system: [] })
+      const messageCountBeforeSecondCall = logMessages.filter(msg => msg.includes('Instructions:')).length
+
+      await hooks['experimental.chat.system.transform']!({ sessionID, model: mockModel }, { system: [] })
+      const messageCountAfterSecondCall = logMessages.filter(msg => msg.includes('Instructions:')).length
+
+      // Assert
+      expect(messageCountAfterSecondCall).toBe(messageCountBeforeSecondCall)
+    })
+
+    it('should log context percentage again for a different session', async () => {
+      // Arrange
+      const githubDir = path.join(tempDir, '.github')
+      fs.mkdirSync(githubDir, { recursive: true })
+      fs.writeFileSync(
+        path.join(githubDir, 'copilot-instructions.md'),
+        '# Repo Instructions\n\nFollow these rules.'
+      )
+
+      const hooks = await CopilotInstructionsPlugin(createPluginInput())
+
+      // Act
+      await hooks['experimental.chat.system.transform']!({ sessionID: 'session-1', model: mockModel }, { system: [] })
+      await hooks['experimental.chat.system.transform']!({ sessionID: 'session-2', model: mockModel }, { system: [] })
+
+      // Assert
+      const contextLogCount = logMessages.filter(msg => msg.includes('Instructions:')).length
+      expect(contextLogCount).toBe(2)
+    })
+
+    it('should NOT log context percentage when model has no context size', async () => {
+      // Arrange
+      const githubDir = path.join(tempDir, '.github')
+      fs.mkdirSync(githubDir, { recursive: true })
+      fs.writeFileSync(
+        path.join(githubDir, 'copilot-instructions.md'),
+        '# Repo Instructions\n\nFollow these rules.'
+      )
+
+      const hooks = await CopilotInstructionsPlugin(createPluginInput())
+      const modelWithoutContext = { providerID: 'test', modelID: 'test-model', limit: {} } as any
+
+      // Act
+      await hooks['experimental.chat.system.transform']!({ sessionID: 'session-1', model: modelWithoutContext }, { system: [] })
+
+      // Assert
+      const contextLogCount = logMessages.filter(msg => msg.includes('Instructions:')).length
+      expect(contextLogCount).toBe(0)
+    })
+
+    it('should log context percentage once model info becomes available', async () => {
+      // Arrange
+      const githubDir = path.join(tempDir, '.github')
+      fs.mkdirSync(githubDir, { recursive: true })
+      fs.writeFileSync(
+        path.join(githubDir, 'copilot-instructions.md'),
+        '# Repo Instructions\n\nFollow these rules.'
+      )
+
+      const hooks = await CopilotInstructionsPlugin(createPluginInput())
+      const modelWithoutContext = { providerID: 'test', modelID: 'test-model', limit: {} } as any
+
+      // Act - first call without context size
+      await hooks['experimental.chat.system.transform']!({ sessionID: 'session-1', model: modelWithoutContext }, { system: [] })
+      expect(logMessages.filter(msg => msg.includes('Instructions:')).length).toBe(0)
+
+      // Act - second call with context size
+      await hooks['experimental.chat.system.transform']!({ sessionID: 'session-1', model: mockModel }, { system: [] })
+
+      // Assert
+      const contextLogCount = logMessages.filter(msg => msg.includes('Instructions:')).length
+      expect(contextLogCount).toBe(1)
+      expect(logMessages.some(msg => msg.includes('200k context'))).toBe(true)
+    })
+
+    it('should re-log context percentage when model changes', async () => {
+      // Arrange
+      const githubDir = path.join(tempDir, '.github')
+      fs.mkdirSync(githubDir, { recursive: true })
+      fs.writeFileSync(
+        path.join(githubDir, 'copilot-instructions.md'),
+        '# Repo Instructions\n\nFollow these rules.'
+      )
+
+      const hooks = await CopilotInstructionsPlugin(createPluginInput())
+      const smallerModel = { providerID: 'test', modelID: 'smaller-model', limit: { context: 128000, output: 8000 } } as any
+
+      // Act - first call with 200k model
+      await hooks['experimental.chat.system.transform']!({ sessionID: 'session-1', model: mockModel }, { system: [] })
+      // Act - second call with 128k model
+      await hooks['experimental.chat.system.transform']!({ sessionID: 'session-1', model: smallerModel }, { system: [] })
+
+      // Assert - should have logged twice (once per distinct context size)
+      const contextLogs = logMessages.filter(msg => msg.includes('Instructions:'))
+      expect(contextLogs.length).toBe(2)
+      expect(contextLogs[0]).toContain('200k context')
+      expect(contextLogs[1]).toContain('128k context')
     })
   })
 
@@ -208,7 +368,7 @@ TS rules.`
       fs.writeFileSync(path.join(githubDir, 'copilot-instructions.md'), repoContent)
 
       const hooks = await CopilotInstructionsPlugin(createPluginInput())
-      const input = { sessionID: 'session-1' }
+      const input = { sessionID: 'session-1', model: mockModel }
       const output = { system: [] as string[] }
 
       // Act
@@ -223,7 +383,7 @@ TS rules.`
       // Arrange - no .github directory
 
       const hooks = await CopilotInstructionsPlugin(createPluginInput())
-      const input = { sessionID: 'session-1' }
+      const input = { sessionID: 'session-1', model: mockModel }
       const output = { system: [] as string[] }
 
       // Act
@@ -240,7 +400,7 @@ TS rules.`
       fs.writeFileSync(path.join(githubDir, 'copilot-instructions.md'), 'Instructions')
 
       const hooks = await CopilotInstructionsPlugin(createPluginInput())
-      const input = { sessionID: 'session-1' }
+      const input = { sessionID: 'session-1', model: mockModel }
       const output = { system: ['Existing system prompt'] }
 
       // Act
@@ -260,7 +420,7 @@ TS rules.`
       fs.writeFileSync(path.join(githubDir, 'copilot-instructions.md'), repoContent)
 
       const hooks = await CopilotInstructionsPlugin(createPluginInput())
-      const input = { sessionID: 'session-1' }
+      const input = { sessionID: 'session-1', model: mockModel }
       const output = { system: [] as string[] }
 
       // Act
@@ -281,7 +441,6 @@ TS rules.`
   })
 
   describe('session.compacted event handling', () => {
-    // Helper to simulate the full tool execution flow
     async function executeToolWithHooks(
       hooks: any,
       input: { tool: string; sessionID: string; callID: string },
@@ -291,7 +450,7 @@ TS rules.`
       const beforeOutput = { args } as any
       await hooks['tool.execute.before']!(input, beforeOutput)
       
-      const afterOutput = { title: '', output: existingOutput, metadata: {} }
+      const afterOutput: { title: string; output: string; metadata: Record<string, any> } = { title: '', output: existingOutput, metadata: {} }
       await hooks['tool.execute.after']!(input, afterOutput)
       
       return { beforeOutput, afterOutput }
@@ -418,7 +577,7 @@ TypeScript rules.`
 
       // Act - First experimental.chat.system.transform call
       const output1 = { system: [] as string[] }
-      await hooks['experimental.chat.system.transform']!({ sessionID }, output1)
+      await hooks['experimental.chat.system.transform']!({ sessionID, model: mockModel }, output1)
 
       // Assert - verify instructions are in output.system
       expect(output1.system).toHaveLength(1)
@@ -435,7 +594,7 @@ TypeScript rules.`
 
       // Act - Second experimental.chat.system.transform call
       const output2 = { system: [] as string[] }
-      await hooks['experimental.chat.system.transform']!({ sessionID }, output2)
+      await hooks['experimental.chat.system.transform']!({ sessionID, model: mockModel }, output2)
 
       // Assert - verify instructions are STILL in output.system
       expect(output2.system).toHaveLength(1)
@@ -456,7 +615,7 @@ TypeScript rules.`
 
       // Act - First experimental.chat.system.transform call
       const output1 = { system: [] as string[] }
-      await hooks['experimental.chat.system.transform']!({ sessionID: 'session-1' }, output1)
+      await hooks['experimental.chat.system.transform']!({ sessionID: 'session-1', model: mockModel }, output1)
 
       // Assert - verify instructions are in output.system
       expect(output1.system).toHaveLength(1)
@@ -468,7 +627,7 @@ TypeScript rules.`
 
       // Act - Second experimental.chat.system.transform call
       const output2 = { system: [] as string[] }
-      await hooks['experimental.chat.system.transform']!({ sessionID: 'session-1' }, output2)
+      await hooks['experimental.chat.system.transform']!({ sessionID: 'session-1', model: mockModel }, output2)
 
       // Assert - verify instructions are STILL in output.system
       expect(output2.system).toHaveLength(1)
@@ -477,7 +636,6 @@ TypeScript rules.`
   })
 
   describe('tool.execute hooks', () => {
-    // Helper to simulate the full tool execution flow
     async function executeToolWithHooks(
       hooks: any,
       input: { tool: string; sessionID: string; callID: string },
@@ -487,7 +645,7 @@ TypeScript rules.`
       const beforeOutput = { args } as any
       await hooks['tool.execute.before']!(input, beforeOutput)
       
-      const afterOutput = { title: '', output: existingOutput, metadata: {} }
+      const afterOutput: { title: string; output: string; metadata: Record<string, any> } = { title: '', output: existingOutput, metadata: {} }
       await hooks['tool.execute.after']!(input, afterOutput)
       
       return { beforeOutput, afterOutput }
@@ -506,7 +664,7 @@ Use TypeScript strict mode.`
       )
 
       const hooks = await CopilotInstructionsPlugin(createPluginInput())
-      const input = { tool: 'read', sessionID: 'session-1', callID: 'call-1' }
+      const input = { tool: 'read', sessionID: 'session-1', callID: 'call-1', args: {} }
       const args = { filePath: path.join(tempDir, 'src/index.ts') }
 
       // Act
@@ -529,7 +687,7 @@ TypeScript editing rules.`
       )
 
       const hooks = await CopilotInstructionsPlugin(createPluginInput())
-      const input = { tool: 'edit', sessionID: 'session-1', callID: 'call-1' }
+      const input = { tool: 'edit', sessionID: 'session-1', callID: 'call-1', args: {} }
       const args = { filePath: path.join(tempDir, 'src/utils.ts') }
 
       // Act
@@ -552,7 +710,7 @@ TypeScript writing rules.`
       )
 
       const hooks = await CopilotInstructionsPlugin(createPluginInput())
-      const input = { tool: 'write', sessionID: 'session-1', callID: 'call-1' }
+      const input = { tool: 'write', sessionID: 'session-1', callID: 'call-1', args: {} }
       const args = { filePath: path.join(tempDir, 'src/new-file.ts') }
 
       // Act
@@ -575,7 +733,7 @@ TypeScript rules.`
       )
 
       const hooks = await CopilotInstructionsPlugin(createPluginInput())
-      const input = { tool: 'read', sessionID: 'session-1', callID: 'call-1' }
+      const input = { tool: 'read', sessionID: 'session-1', callID: 'call-1', args: {} }
       const args = { filePath: path.join(tempDir, 'readme.md') }
       const originalOutput = 'File contents'
 
@@ -624,7 +782,7 @@ TypeScript rules.`
       )
 
       const hooks = await CopilotInstructionsPlugin(createPluginInput())
-      const input = { tool: 'read', sessionID: 'session-1', callID: 'call-1' }
+      const input = { tool: 'read', sessionID: 'session-1', callID: 'call-1', args: {} }
       const args = {}
       const originalOutput = 'Some output'
 
@@ -1020,6 +1178,321 @@ TypeScript rules.`
         'Other file contents'
       )
       expect(afterOutput2.output).toBe('Other file contents')
+    })
+
+    it('should populate metadata.loaded with instruction file paths when injecting', async () => {
+      // Arrange
+      const instructionsDir = path.join(tempDir, '.github', 'instructions')
+      fs.mkdirSync(instructionsDir, { recursive: true })
+      fs.writeFileSync(
+        path.join(instructionsDir, 'typescript.instructions.md'),
+        `---
+applyTo: "**/*.ts"
+---
+TypeScript rules.`
+      )
+
+      const hooks = await CopilotInstructionsPlugin(createPluginInput())
+      await hooks['experimental.chat.system.transform']!({ sessionID: 'session-1', model: mockModel }, { system: [] })
+      const { afterOutput } = await executeToolWithHooks(
+        hooks,
+        { tool: 'read', sessionID: 'session-1', callID: 'call-1' },
+        { filePath: path.join(tempDir, 'src/index.ts') }
+      )
+
+      // Assert - metadata.loaded should contain the instruction file path with token count + summary
+      expect(afterOutput.metadata.loaded).toBeDefined()
+      expect(afterOutput.metadata.loaded).toBeInstanceOf(Array)
+      expect(afterOutput.metadata.loaded).toHaveLength(2)
+      expect(afterOutput.metadata.loaded[0]).toMatch(/^typescript\.instructions\.md \(\d+ tokens\)$/)
+      expect(afterOutput.metadata.loaded[1]).toMatch(/^Total: 1 instruction active \((\d+|\d+\.\d+k) tokens, (<0\.1|\d+\.\d+)% of context\)$/)
+    })
+
+    it('should populate metadata.loaded with multiple instruction file paths', async () => {
+      // Arrange
+      const instructionsDir = path.join(tempDir, '.github', 'instructions')
+      fs.mkdirSync(instructionsDir, { recursive: true })
+      fs.writeFileSync(
+        path.join(instructionsDir, 'typescript.instructions.md'),
+        `---
+applyTo: "**/*.ts"
+---
+TypeScript rules.`
+      )
+      fs.writeFileSync(
+        path.join(instructionsDir, 'src.instructions.md'),
+        `---
+applyTo: "src/**/*"
+---
+Source directory rules.`
+      )
+
+      const hooks = await CopilotInstructionsPlugin(createPluginInput())
+      await hooks['experimental.chat.system.transform']!({ sessionID: 'session-1', model: mockModel }, { system: [] })
+      const { afterOutput } = await executeToolWithHooks(
+        hooks,
+        { tool: 'read', sessionID: 'session-1', callID: 'call-1' },
+        { filePath: path.join(tempDir, 'src/index.ts') }
+      )
+
+      // Assert
+      expect(afterOutput.metadata.loaded).toHaveLength(3)
+      const loadedPaths = afterOutput.metadata.loaded as string[]
+      expect(loadedPaths.some((p: string) => p.match(/^src\.instructions\.md \(\d+ tokens\)$/))).toBe(true)
+      expect(loadedPaths.some((p: string) => p.match(/^typescript\.instructions\.md \(\d+ tokens\)$/))).toBe(true)
+      expect(loadedPaths[2]).toMatch(/^Total: 2 instructions active \((\d+|\d+\.\d+k) tokens, (<0\.1|\d+\.\d+)% of context\)$/)
+    })
+
+    it('should not set metadata.loaded when no instructions match', async () => {
+      // Arrange
+      const instructionsDir = path.join(tempDir, '.github', 'instructions')
+      fs.mkdirSync(instructionsDir, { recursive: true })
+      fs.writeFileSync(
+        path.join(instructionsDir, 'typescript.instructions.md'),
+        `---
+applyTo: "**/*.ts"
+---
+TypeScript rules.`
+      )
+
+      const hooks = await CopilotInstructionsPlugin(createPluginInput())
+      const { afterOutput } = await executeToolWithHooks(
+        hooks,
+        { tool: 'read', sessionID: 'session-1', callID: 'call-1' },
+        { filePath: path.join(tempDir, 'readme.md') },
+        'File contents'
+      )
+
+      // Assert - metadata.loaded should not be set
+      expect(afterOutput.metadata.loaded).toBeUndefined()
+    })
+
+    it('should preserve existing metadata.loaded entries', async () => {
+      // Arrange
+      const instructionsDir = path.join(tempDir, '.github', 'instructions')
+      fs.mkdirSync(instructionsDir, { recursive: true })
+      fs.writeFileSync(
+        path.join(instructionsDir, 'typescript.instructions.md'),
+        `---
+applyTo: "**/*.ts"
+---
+TypeScript rules.`
+      )
+
+      const hooks = await CopilotInstructionsPlugin(createPluginInput())
+      await hooks['experimental.chat.system.transform']!({ sessionID: 'session-1', model: mockModel }, { system: [] })
+      const input = { tool: 'read', sessionID: 'session-1', callID: 'call-1', args: {} }
+      const beforeOutput = { args: { filePath: path.join(tempDir, 'src/index.ts') } } as any
+      await hooks['tool.execute.before']!(input, beforeOutput)
+
+      // Simulate existing metadata.loaded from OpenCode (e.g., AGENTS.md)
+      const afterOutput = {
+        title: '',
+        output: 'File contents here',
+        metadata: { loaded: ['.github/AGENTS.md'] }
+      }
+      await hooks['tool.execute.after']!(input, afterOutput)
+
+      // Assert - should preserve existing and add new + summary
+      expect(afterOutput.metadata.loaded).toHaveLength(3)
+      expect(afterOutput.metadata.loaded[0]).toBe('.github/AGENTS.md')
+      expect(afterOutput.metadata.loaded[1]).toMatch(/^typescript\.instructions\.md \(\d+ tokens\)$/)
+      expect(afterOutput.metadata.loaded[2]).toMatch(/^Total: 1 instruction active \((\d+|\d+\.\d+k) tokens, (<0\.1|\d+\.\d+)% of context\)$/)
+    })
+
+    it('should include total summary in metadata.loaded with singular count', async () => {
+      // Arrange
+      const instructionsDir = path.join(tempDir, '.github', 'instructions')
+      fs.mkdirSync(instructionsDir, { recursive: true })
+      fs.writeFileSync(
+        path.join(instructionsDir, 'typescript.instructions.md'),
+        `---
+applyTo: "**/*.ts"
+---
+TypeScript rules.`
+      )
+
+      const hooks = await CopilotInstructionsPlugin(createPluginInput())
+      await hooks['experimental.chat.system.transform']!({ sessionID: 'session-1', model: mockModel }, { system: [] })
+      const { afterOutput } = await executeToolWithHooks(
+        hooks,
+        { tool: 'read', sessionID: 'session-1', callID: 'call-1' },
+        { filePath: path.join(tempDir, 'src/index.ts') }
+      )
+
+      // Assert
+      const loaded = afterOutput.metadata.loaded as string[]
+      const summary = loaded[loaded.length - 1]
+      expect(summary).toMatch(/^Total: 1 instruction active \((\d+|\d+\.\d+k) tokens, (<0\.1|\d+\.\d+)% of context\)$/)
+    })
+
+    it('should include total summary with plural count for multiple instructions', async () => {
+      // Arrange
+      const instructionsDir = path.join(tempDir, '.github', 'instructions')
+      fs.mkdirSync(instructionsDir, { recursive: true })
+      fs.writeFileSync(
+        path.join(instructionsDir, 'typescript.instructions.md'),
+        `---
+applyTo: "**/*.ts"
+---
+TypeScript rules.`
+      )
+      fs.writeFileSync(
+        path.join(instructionsDir, 'src.instructions.md'),
+        `---
+applyTo: "src/**/*"
+---
+Source directory rules.`
+      )
+
+      const hooks = await CopilotInstructionsPlugin(createPluginInput())
+      await hooks['experimental.chat.system.transform']!({ sessionID: 'session-1', model: mockModel }, { system: [] })
+      const { afterOutput } = await executeToolWithHooks(
+        hooks,
+        { tool: 'read', sessionID: 'session-1', callID: 'call-1' },
+        { filePath: path.join(tempDir, 'src/index.ts') }
+      )
+
+      // Assert
+      const loaded = afterOutput.metadata.loaded as string[]
+      const summary = loaded[loaded.length - 1]
+      expect(summary).toMatch(/^Total: 2 instructions active \((\d+|\d+\.\d+k) tokens, (<0\.1|\d+\.\d+)% of context\)$/)
+    })
+
+    it('should include repo-wide instruction in total summary count', async () => {
+      // Arrange
+      const githubDir = path.join(tempDir, '.github')
+      const instructionsDir = path.join(githubDir, 'instructions')
+      fs.mkdirSync(instructionsDir, { recursive: true })
+      fs.writeFileSync(
+        path.join(githubDir, 'copilot-instructions.md'),
+        '# Repo Instructions'
+      )
+      fs.writeFileSync(
+        path.join(instructionsDir, 'typescript.instructions.md'),
+        `---
+applyTo: "**/*.ts"
+---
+TypeScript rules.`
+      )
+
+      const hooks = await CopilotInstructionsPlugin(createPluginInput())
+      await hooks['experimental.chat.system.transform']!({ sessionID: 'session-1', model: mockModel }, { system: [] })
+      const { afterOutput } = await executeToolWithHooks(
+        hooks,
+        { tool: 'read', sessionID: 'session-1', callID: 'call-1' },
+        { filePath: path.join(tempDir, 'src/index.ts') }
+      )
+
+      // Assert - total should be 2 (1 repo-wide + 1 path-specific), repo info shown first
+      const loaded = afterOutput.metadata.loaded as string[]
+      expect(loaded).toHaveLength(3)
+      expect(loaded[0]).toMatch(/^copilot-instructions\.md \(\d+ tokens\)$/)
+      expect(loaded[1]).toMatch(/^typescript\.instructions\.md \(\d+ tokens\)$/)
+      expect(loaded[2]).toMatch(/^Total: 2 instructions active \((\d+|\d+\.\d+k) tokens, (<0\.1|\d+\.\d+)% of context\)$/)
+    })
+
+    it('should accumulate total count across multiple tool calls', async () => {
+      const githubDir = path.join(tempDir, '.github')
+      const instructionsDir = path.join(githubDir, 'instructions')
+      fs.mkdirSync(instructionsDir, { recursive: true })
+      fs.writeFileSync(
+        path.join(githubDir, 'copilot-instructions.md'),
+        '# Repo Instructions'
+      )
+      fs.writeFileSync(
+        path.join(instructionsDir, 'typescript.instructions.md'),
+        `---
+applyTo: "**/*.ts"
+---
+TypeScript rules.`
+      )
+      fs.writeFileSync(
+        path.join(instructionsDir, 'python.instructions.md'),
+        `---
+applyTo: "**/*.py"
+---
+Python rules.`
+      )
+
+      const hooks = await CopilotInstructionsPlugin(createPluginInput())
+      const sessionID = 'session-1'
+      await hooks['experimental.chat.system.transform']!({ sessionID, model: mockModel }, { system: [] })
+
+      // First call - loads typescript instruction
+      const { afterOutput: afterOutput1 } = await executeToolWithHooks(
+        hooks,
+        { tool: 'read', sessionID, callID: 'call-1' },
+        { filePath: path.join(tempDir, 'src/index.ts') }
+      )
+      const loaded1 = afterOutput1.metadata.loaded as string[]
+      expect(loaded1).toHaveLength(3) // repo entry + ts entry + summary
+      expect(loaded1[0]).toMatch(/^copilot-instructions\.md \(\d+ tokens\)$/)
+      expect(loaded1[1]).toMatch(/^typescript\.instructions\.md \(\d+ tokens\)$/)
+      expect(loaded1[2]).toMatch(/^Total: 2 instructions active/) // 1 repo + 1 ts
+
+      // Second call - loads python instruction (repo entry NOT shown again)
+      const { afterOutput: afterOutput2 } = await executeToolWithHooks(
+        hooks,
+        { tool: 'read', sessionID, callID: 'call-2' },
+        { filePath: path.join(tempDir, 'src/script.py') }
+      )
+      const loaded2 = afterOutput2.metadata.loaded as string[]
+      expect(loaded2).toHaveLength(2) // py entry + summary (no repo entry)
+      expect(loaded2[0]).toMatch(/^python\.instructions\.md \(\d+ tokens\)$/)
+      expect(loaded2[1]).toMatch(/^Total: 3 instructions active/) // 1 repo + 1 ts + 1 py (accumulated)
+    })
+
+    it('should omit context percentage when model context size is unknown', async () => {
+      const instructionsDir = path.join(tempDir, '.github', 'instructions')
+      fs.mkdirSync(instructionsDir, { recursive: true })
+      fs.writeFileSync(
+        path.join(instructionsDir, 'typescript.instructions.md'),
+        `---
+applyTo: "**/*.ts"
+---
+TypeScript rules.`
+      )
+
+      const hooks = await CopilotInstructionsPlugin(createPluginInput())
+      const { afterOutput } = await executeToolWithHooks(
+        hooks,
+        { tool: 'read', sessionID: 'session-1', callID: 'call-1' },
+        { filePath: path.join(tempDir, 'src/index.ts') }
+      )
+
+      const loaded = afterOutput.metadata.loaded as string[]
+      const summary = loaded[loaded.length - 1]
+      expect(summary).toMatch(/^Total: 1 instruction active \((\d+|\d+\.\d+k) tokens\)$/)
+    })
+
+    it('should not add summary to metadata.loaded when no instructions match', async () => {
+      // Arrange
+      const instructionsDir = path.join(tempDir, '.github', 'instructions')
+      fs.mkdirSync(instructionsDir, { recursive: true })
+      fs.writeFileSync(
+        path.join(instructionsDir, 'typescript.instructions.md'),
+        `---
+applyTo: "**/*.ts"
+---
+TypeScript rules.`
+      )
+
+      const hooks = await CopilotInstructionsPlugin(createPluginInput())
+      const input = { tool: 'read', sessionID: 'session-1', callID: 'call-1', args: {} }
+      const beforeOutput = { args: { filePath: path.join(tempDir, 'readme.md') } } as any
+      await hooks['tool.execute.before']!(input, beforeOutput)
+
+      const afterOutput = {
+        title: 'Read readme.md',
+        output: 'File contents',
+        metadata: {} as Record<string, unknown>
+      }
+      await hooks['tool.execute.after']!(input, afterOutput)
+
+      // Assert
+      expect(afterOutput.metadata.loaded).toBeUndefined()
+      expect(afterOutput.title).toBe('Read readme.md')
     })
 
     it('should re-inject path instructions after multiple consecutive undos', async () => {

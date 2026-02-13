@@ -14,20 +14,20 @@ describe('SessionState', () => {
     })
 
     it('should return true after marking file as injected', () => {
-      state.markFileInjected('session-1', '/path/to/file.md')
+      state.markFileInjected('session-1', '/path/to/file.md', 100)
       expect(state.isFileInjected('session-1', '/path/to/file.md')).toBe(true)
     })
 
     it('should track files per session independently', () => {
-      state.markFileInjected('session-1', '/path/to/file.md')
+      state.markFileInjected('session-1', '/path/to/file.md', 100)
       
       expect(state.isFileInjected('session-1', '/path/to/file.md')).toBe(true)
       expect(state.isFileInjected('session-2', '/path/to/file.md')).toBe(false)
     })
 
     it('should track multiple files per session', () => {
-      state.markFileInjected('session-1', '/path/to/file1.md')
-      state.markFileInjected('session-1', '/path/to/file2.md')
+      state.markFileInjected('session-1', '/path/to/file1.md', 50)
+      state.markFileInjected('session-1', '/path/to/file2.md', 75)
       
       expect(state.isFileInjected('session-1', '/path/to/file1.md')).toBe(true)
       expect(state.isFileInjected('session-1', '/path/to/file2.md')).toBe(true)
@@ -35,8 +35,8 @@ describe('SessionState', () => {
     })
 
     it('should clear file marker for specific session', () => {
-      state.markFileInjected('session-1', '/path/to/file.md')
-      state.markFileInjected('session-2', '/path/to/file.md')
+      state.markFileInjected('session-1', '/path/to/file.md', 100)
+      state.markFileInjected('session-2', '/path/to/file.md', 100)
       
       state.clearFileMarker('session-1', '/path/to/file.md')
       
@@ -58,8 +58,8 @@ describe('SessionState', () => {
 
   describe('syncWithMarkers', () => {
     it('should clear files whose markers are not present', () => {
-      state.markFileInjected('session-1', '/path/to/file1.md')
-      state.markFileInjected('session-1', '/path/to/file2.md')
+      state.markFileInjected('session-1', '/path/to/file1.md', 50)
+      state.markFileInjected('session-1', '/path/to/file2.md', 75)
       
       // Only file1.md marker is present (basename match)
       const presentMarkers = new Set(['file1.md'])
@@ -70,8 +70,8 @@ describe('SessionState', () => {
     })
 
     it('should sync across all sessions', () => {
-      state.markFileInjected('session-1', '/path/to/file.md')
-      state.markFileInjected('session-2', '/path/to/file.md')
+      state.markFileInjected('session-1', '/path/to/file.md', 100)
+      state.markFileInjected('session-2', '/path/to/file.md', 100)
       
       // No markers present - should clear from all sessions
       const presentMarkers = new Set<string>()
@@ -82,7 +82,7 @@ describe('SessionState', () => {
     })
 
     it('should keep files whose markers are present', () => {
-      state.markFileInjected('session-1', '/path/to/keep.md')
+      state.markFileInjected('session-1', '/path/to/keep.md', 100)
       
       const presentMarkers = new Set(['keep.md'])
       state.syncWithMarkers(presentMarkers)
@@ -115,17 +115,34 @@ describe('SessionState', () => {
       expect(state.getPending('call-2')).toBe('instruction 2')
     })
 
-    it('should consume and clear pending instructions', () => {
+    it('should consume and return text and loadedFiles together', () => {
+      state.setPending('call-1', 'instruction text', [{ file: '/path/to/file.md', tokenCount: 100 }])
+      
+      const result = state.consumePending('call-1')
+      
+      expect(result).toEqual({ text: 'instruction text', loadedFiles: [{ file: '/path/to/file.md', tokenCount: 100 }] })
+      expect(state.getPending('call-1')).toBeUndefined()
+    })
+
+    it('should return empty loadedFiles when none provided', () => {
       state.setPending('call-1', 'instruction text')
       
       const result = state.consumePending('call-1')
       
-      expect(result).toBe('instruction text')
-      expect(state.getPending('call-1')).toBeUndefined()
+      expect(result).toEqual({ text: 'instruction text', loadedFiles: [] })
     })
 
     it('should return undefined when consuming non-existent call', () => {
       expect(state.consumePending('nonexistent')).toBeUndefined()
+    })
+
+    it('should store multiple loadedFiles', () => {
+      const files = [{ file: '/path/to/file1.md', tokenCount: 50 }, { file: '/path/to/file2.md', tokenCount: 75 }]
+      state.setPending('call-1', 'instruction text', files)
+      
+      const result = state.consumePending('call-1')
+      
+      expect(result?.loadedFiles).toEqual(files)
     })
   })
 
@@ -136,8 +153,8 @@ describe('SessionState', () => {
     })
 
     it('should return all injected files for session', () => {
-      state.markFileInjected('session-1', '/path/to/file1.md')
-      state.markFileInjected('session-1', '/path/to/file2.md')
+      state.markFileInjected('session-1', '/path/to/file1.md', 50)
+      state.markFileInjected('session-1', '/path/to/file2.md', 75)
       
       const files = state.getInjectedFiles('session-1')
       
@@ -147,7 +164,7 @@ describe('SessionState', () => {
     })
 
     it('should return a copy, not the internal set', () => {
-      state.markFileInjected('session-1', '/path/to/file.md')
+      state.markFileInjected('session-1', '/path/to/file.md', 100)
       
       const files = state.getInjectedFiles('session-1')
       files.delete('/path/to/file.md')  // Modify the returned set
@@ -157,10 +174,165 @@ describe('SessionState', () => {
     })
   })
 
+  describe('getInjectedTokens', () => {
+    it('should return 0 for non-existent session', () => {
+      expect(state.getInjectedTokens('session-1')).toBe(0)
+    })
+
+    it('should return token count for single injected file', () => {
+      state.markFileInjected('session-1', '/path/to/file.md', 150)
+      expect(state.getInjectedTokens('session-1')).toBe(150)
+    })
+
+    it('should sum token counts across multiple files', () => {
+      state.markFileInjected('session-1', '/path/to/file1.md', 100)
+      state.markFileInjected('session-1', '/path/to/file2.md', 250)
+      state.markFileInjected('session-1', '/path/to/file3.md', 50)
+      expect(state.getInjectedTokens('session-1')).toBe(400)
+    })
+
+    it('should track tokens per session independently', () => {
+      state.markFileInjected('session-1', '/path/to/file.md', 100)
+      state.markFileInjected('session-2', '/path/to/file.md', 200)
+
+      expect(state.getInjectedTokens('session-1')).toBe(100)
+      expect(state.getInjectedTokens('session-2')).toBe(200)
+    })
+
+    it('should decrease after clearing a file marker', () => {
+      state.markFileInjected('session-1', '/path/to/file1.md', 100)
+      state.markFileInjected('session-1', '/path/to/file2.md', 200)
+
+      state.clearFileMarker('session-1', '/path/to/file1.md')
+
+      expect(state.getInjectedTokens('session-1')).toBe(200)
+    })
+
+    it('should return 0 after clearing session', () => {
+      state.markFileInjected('session-1', '/path/to/file1.md', 100)
+      state.markFileInjected('session-1', '/path/to/file2.md', 200)
+
+      state.clearSession('session-1')
+
+      expect(state.getInjectedTokens('session-1')).toBe(0)
+    })
+
+    it('should update after syncWithMarkers removes files', () => {
+      state.markFileInjected('session-1', '/path/to/file1.md', 100)
+      state.markFileInjected('session-1', '/path/to/file2.md', 200)
+
+      // Only keep file1.md
+      state.syncWithMarkers(new Set(['file1.md']))
+
+      expect(state.getInjectedTokens('session-1')).toBe(100)
+    })
+  })
+
+  describe('context size tracking', () => {
+    it('should return 0 for session without context size', () => {
+      expect(state.getContextSize('session-1')).toBe(0)
+    })
+
+    it('should store and retrieve context size per session', () => {
+      state.setContextSize('session-1', 200000)
+      expect(state.getContextSize('session-1')).toBe(200000)
+    })
+
+    it('should track context size per session independently', () => {
+      state.setContextSize('session-1', 200000)
+      state.setContextSize('session-2', 128000)
+
+      expect(state.getContextSize('session-1')).toBe(200000)
+      expect(state.getContextSize('session-2')).toBe(128000)
+    })
+
+    it('should overwrite context size on repeated set', () => {
+      state.setContextSize('session-1', 200000)
+      state.setContextSize('session-1', 128000)
+
+      expect(state.getContextSize('session-1')).toBe(128000)
+    })
+
+    it('should be cleared when session is cleared', () => {
+      state.setContextSize('session-1', 200000)
+      state.clearSession('session-1')
+
+      expect(state.getContextSize('session-1')).toBe(0)
+    })
+  })
+
+  describe('contextLogged tracking', () => {
+    it('should return false for session not yet logged', () => {
+      expect(state.isContextLogged('session-1', 200000)).toBe(false)
+    })
+
+    it('should return true after marking context as logged with same context size', () => {
+      state.markContextLogged('session-1', 200000)
+      expect(state.isContextLogged('session-1', 200000)).toBe(true)
+    })
+
+    it('should return false when context size changes', () => {
+      state.markContextLogged('session-1', 200000)
+      expect(state.isContextLogged('session-1', 200000)).toBe(true)
+      expect(state.isContextLogged('session-1', 128000)).toBe(false)
+    })
+
+    it('should track per session independently', () => {
+      state.markContextLogged('session-1', 200000)
+      expect(state.isContextLogged('session-1', 200000)).toBe(true)
+      expect(state.isContextLogged('session-2', 200000)).toBe(false)
+    })
+
+    it('should be cleared when session is cleared', () => {
+      state.markContextLogged('session-1', 200000)
+      state.clearSession('session-1')
+      expect(state.isContextLogged('session-1', 200000)).toBe(false)
+    })
+
+    it('should not affect other sessions when one is cleared', () => {
+      state.markContextLogged('session-1', 200000)
+      state.markContextLogged('session-2', 200000)
+      state.clearSession('session-1')
+      expect(state.isContextLogged('session-1', 200000)).toBe(false)
+      expect(state.isContextLogged('session-2', 200000)).toBe(true)
+    })
+  })
+
+  describe('repoInfoShown tracking', () => {
+    it('should return false for session not yet shown', () => {
+      expect(state.isRepoInfoShown('session-1')).toBe(false)
+    })
+
+    it('should return true after marking repo info as shown', () => {
+      state.markRepoInfoShown('session-1')
+      expect(state.isRepoInfoShown('session-1')).toBe(true)
+    })
+
+    it('should track per session independently', () => {
+      state.markRepoInfoShown('session-1')
+      expect(state.isRepoInfoShown('session-1')).toBe(true)
+      expect(state.isRepoInfoShown('session-2')).toBe(false)
+    })
+
+    it('should be cleared when session is cleared', () => {
+      state.markRepoInfoShown('session-1')
+      state.clearSession('session-1')
+      expect(state.isRepoInfoShown('session-1')).toBe(false)
+    })
+
+    it('should not affect other sessions when one is cleared', () => {
+      state.markRepoInfoShown('session-1')
+      state.markRepoInfoShown('session-2')
+      state.clearSession('session-1')
+      expect(state.isRepoInfoShown('session-1')).toBe(false)
+      expect(state.isRepoInfoShown('session-2')).toBe(true)
+    })
+  })
+
   describe('clearSession', () => {
     it('should clear all file injection state for a session', () => {
-      state.markFileInjected('session-1', '/path/to/file1.md')
-      state.markFileInjected('session-1', '/path/to/file2.md')
+      state.markFileInjected('session-1', '/path/to/file1.md', 50)
+      state.markFileInjected('session-1', '/path/to/file2.md', 75)
       
       state.clearSession('session-1')
       
@@ -169,8 +341,8 @@ describe('SessionState', () => {
     })
 
     it('should not affect other sessions', () => {
-      state.markFileInjected('session-1', '/path/to/file.md')
-      state.markFileInjected('session-2', '/path/to/file.md')
+      state.markFileInjected('session-1', '/path/to/file.md', 100)
+      state.markFileInjected('session-2', '/path/to/file.md', 100)
       
       state.clearSession('session-1')
       

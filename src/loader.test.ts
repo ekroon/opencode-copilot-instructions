@@ -3,6 +3,7 @@ import * as fs from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
 import { loadRepoInstructions, loadPathInstructions } from './loader'
+import { countTokens } from './tokens'
 
 describe('loader', () => {
   let tempDir: string
@@ -28,7 +29,7 @@ describe('loader', () => {
       const result = loadRepoInstructions(tempDir)
 
       // Assert
-      expect(result).toBe(content)
+      expect(result!.content).toBe(content)
     })
 
     it('should return null when file does not exist', () => {
@@ -66,7 +67,23 @@ describe('loader', () => {
       const result = loadRepoInstructions(tempDir)
 
       // Assert
-      expect(result).toBe(content)
+      expect(result!.content).toBe(content)
+    })
+
+    it('should include tokenCount in result', () => {
+      // Arrange
+      const githubDir = path.join(tempDir, '.github')
+      fs.mkdirSync(githubDir)
+      const filePath = path.join(githubDir, 'copilot-instructions.md')
+      const content = 'Repository instructions with some content.'
+      fs.writeFileSync(filePath, content)
+
+      // Act
+      const result = loadRepoInstructions(tempDir)
+
+      // Assert
+      expect(result!.tokenCount).toBeGreaterThan(0)
+      expect(typeof result!.tokenCount).toBe('number')
     })
   })
 
@@ -277,6 +294,46 @@ Web rules.`)
 
       // Assert
       expect(result).toEqual([]) // Should be skipped - no applyTo
+    })
+
+    it('should include tokenCount on each path instruction', () => {
+      // Arrange
+      const instructionsDir = path.join(tempDir, '.github', 'instructions')
+      fs.mkdirSync(instructionsDir, { recursive: true })
+
+      const file = path.join(instructionsDir, 'test.instructions.md')
+      fs.writeFileSync(file, `---
+applyTo: "**/*.ts"
+---
+Use strict TypeScript.`)
+
+      // Act
+      const result = loadPathInstructions(tempDir)
+
+      // Assert
+      expect(result).toHaveLength(1)
+      expect(result[0].tokenCount).toBeGreaterThan(0)
+      expect(typeof result[0].tokenCount).toBe('number')
+    })
+
+    it('should include tokenCount matching the body content', () => {
+      // Arrange
+      const instructionsDir = path.join(tempDir, '.github', 'instructions')
+      fs.mkdirSync(instructionsDir, { recursive: true })
+
+      const bodyText = 'Use strict TypeScript.'
+      const file = path.join(instructionsDir, 'strict.instructions.md')
+      fs.writeFileSync(file, `---
+applyTo: "**/*.ts"
+---
+${bodyText}`)
+
+      // Act
+      const result = loadPathInstructions(tempDir)
+
+      // Assert
+      expect(result).toHaveLength(1)
+      expect(result[0].tokenCount).toBe(countTokens(bodyText))
     })
   })
 })

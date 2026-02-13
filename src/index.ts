@@ -3,6 +3,7 @@ import type { Plugin } from '@opencode-ai/plugin'
 import type { Event, EventSessionCompacted } from '@opencode-ai/sdk'
 import { loadRepoInstructions, loadPathInstructions, type PathInstruction } from './loader'
 import { SessionState } from './session-state'
+import { formatTokenCount, formatTokenPercentage } from './tokens'
 
 /**
  * Type guard to check if an event is a session.compacted event.
@@ -74,20 +75,27 @@ export const CopilotInstructionsPlugin: Plugin = async (ctx) => {
     })
   }
 
-  // Log what was loaded
+  // Log what was loaded with token stats
   if (repoInstructions) {
-    log('Loaded repo instructions from .github/copilot-instructions.md')
+    log(`Loaded repo instructions from .github/copilot-instructions.md (${formatTokenCount(repoInstructions.tokenCount)} tokens)`)
   }
 
   if (pathInstructions.length > 0) {
     for (const instruction of pathInstructions) {
       const filename = path.basename(instruction.file)
-      log(`Loaded path instructions from ${filename}`)
+      log(`Loaded path instructions from ${filename} (${formatTokenCount(instruction.tokenCount)} tokens)`)
     }
   }
 
   if (!repoInstructions && pathInstructions.length === 0) {
     log('No Copilot instructions found')
+  }
+
+  const totalTokens = (repoInstructions?.tokenCount ?? 0)
+    + pathInstructions.reduce((sum, i) => sum + i.tokenCount, 0)
+
+  if (totalTokens > 0) {
+    log(`Total instruction tokens: ${formatTokenCount(totalTokens)}`)
   }
 
   // Encapsulated state management
@@ -109,16 +117,28 @@ export const CopilotInstructionsPlugin: Plugin = async (ctx) => {
     },
 
     // Inject repo-wide instructions into the system prompt on every LLM call
-    'experimental.chat.system.transform': async (_input, output) => {
+    'experimental.chat.system.transform': async (input, output) => {
       if (repoInstructions) {
-        output.system.push(`<copilot-instruction:copilot-instructions.md>\n${repoInstructions.trimEnd()}\n</copilot-instruction:copilot-instructions.md>`)
+        output.system.push(`<copilot-instruction:copilot-instructions.md>\n${repoInstructions.content.trimEnd()}\n</copilot-instruction:copilot-instructions.md>`)
+      }
+
+      if (input.sessionID) {
+        const contextSize = (input.model as { limit?: { context?: number } })?.limit?.context ?? 0
+        if (contextSize > 0) {
+          state.setContextSize(input.sessionID, contextSize)
+        }
+
+        if (totalTokens > 0 && contextSize > 0 && !state.isContextLogged(input.sessionID, contextSize)) {
+          state.markContextLogged(input.sessionID, contextSize)
+          log(`Instructions: ${formatTokenCount(totalTokens)} tokens (${formatTokenPercentage(totalTokens, contextSize)} of ${formatTokenCount(contextSize)} context)`)
+        }
       }
     },
 
     // Preserve repo-wide instructions during compaction
     'experimental.session.compacting': async (_input, output) => {
       if (repoInstructions) {
-        output.context.push(`<copilot-instruction:copilot-instructions.md>\n${repoInstructions.trimEnd()}\n</copilot-instruction:copilot-instructions.md>`)
+        output.context.push(`<copilot-instruction:copilot-instructions.md>\n${repoInstructions.content.trimEnd()}\n</copilot-instruction:copilot-instructions.md>`)
       }
     },
 
@@ -149,7 +169,7 @@ export const CopilotInstructionsPlugin: Plugin = async (ctx) => {
         // Check if file matches this instruction's patterns
         if (instruction.matcher(relativePath)) {
           matchingInstructions.push(instruction)
-          state.markFileInjected(input.sessionID, instruction.file)
+          state.markFileInjected(input.sessionID, instruction.file, instruction.tokenCount)
         }
       }
 
@@ -163,17 +183,36 @@ export const CopilotInstructionsPlugin: Plugin = async (ctx) => {
           })
           .join('\n\n')
 
-        state.setPending(input.callID, instructionText)
+        const loadedFiles = matchingInstructions.map(i => ({ file: i.file, tokenCount: i.tokenCount }))
+        state.setPending(input.callID, instructionText, loadedFiles)
         log(`Queued ${matchingInstructions.length} path instructions for ${relativePath}`, 'debug')
       }
     },
 
     'tool.execute.after': async (input, output) => {
-      // Check if we have pending instructions for this tool call
-      const instructionText = state.consumePending(input.callID)
-      if (instructionText) {
-        // Append instructions to the tool output
-        output.output = `${output.output}\n\n${instructionText}`
+      const pending = state.consumePending(input.callID)
+      if (pending) {
+        output.output = `${output.output}\n\n${pending.text}`
+
+        const pathCount = pending.loadedFiles.length
+        if (pathCount > 0) {
+          const existing = (output.metadata as Record<string, unknown>)?.loaded
+          const existingArray = Array.isArray(existing) ? existing : []
+          const totalCount = state.getInjectedFiles(input.sessionID).size + (repoInstructions ? 1 : 0)
+          const activeTokens = state.getInjectedTokens(input.sessionID) + (repoInstructions?.tokenCount ?? 0)
+          const contextSize = state.getContextSize(input.sessionID)
+          const pct = contextSize > 0 ? `, ${formatTokenPercentage(activeTokens, contextSize)} of context` : ''
+          const summary = `Total: ${totalCount} instruction${totalCount > 1 ? 's' : ''} active (${formatTokenCount(activeTokens)} tokens${pct})`
+          const repoEntry = repoInstructions && !state.isRepoInfoShown(input.sessionID)
+            ? [`copilot-instructions.md (${formatTokenCount(repoInstructions.tokenCount)} tokens)`]
+            : []
+          if (repoInstructions) {
+            state.markRepoInfoShown(input.sessionID)
+          }
+          const loadedEntries = pending.loadedFiles.map(f => `${path.basename(f.file)} (${formatTokenCount(f.tokenCount)} tokens)`)
+          ;(output.metadata as Record<string, unknown>).loaded = [...existingArray, ...repoEntry, ...loadedEntries, summary]
+        }
+
         log(`Injected path instructions for call ${input.callID}`, 'debug')
       }
     },

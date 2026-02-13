@@ -30,14 +30,15 @@
   },
   "dependencies": {
     "front-matter": "^4.0.2",
+    "js-tiktoken": "^1.0.21",
     "picomatch": "^4.0.0"
   },
   "peerDependencies": {
     "@opencode-ai/plugin": "*"
   },
   "devDependencies": {
-    "@opencode-ai/plugin": "latest",
-    "@opencode-ai/sdk": "^1.1.3",
+    "@opencode-ai/plugin": "^1.1.65",
+    "@opencode-ai/sdk": "^1.1.65",
     "@types/node": "^22.0.0",
     "@types/picomatch": "^3.0.0",
     "typescript": "^5.0.0",
