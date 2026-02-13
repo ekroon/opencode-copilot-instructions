@@ -8,13 +8,20 @@ import * as path from 'node:path'
  * 2. Pending instructions for tool call lifecycle (ephemeral)
  */
 export class SessionState {
-  // Track which instruction files have been injected per session
-  // Map<sessionID, Set<instructionFilePath>>
-  private injectedPerSession = new Map<string, Set<string>>()
+  // Map<sessionID, Map<instructionFilePath, tokenCount>>
+  private injectedPerSession = new Map<string, Map<string, number>>()
 
-  // Track pending instructions to inject per tool call (ephemeral)
-  // Map<callID, { text: string, loadedFiles: string[] }>
-  private pendingInstructions = new Map<string, { text: string; loadedFiles: string[] }>()
+  // Map<callID, { text: string, loadedFiles: Array<{ file: string; tokenCount: number }> }>
+  private pendingInstructions = new Map<string, { text: string; loadedFiles: Array<{ file: string; tokenCount: number }> }>()
+
+  // Map<sessionID, contextWindowSize>
+  private contextSizePerSession = new Map<string, number>()
+
+  // Map<sessionID, contextSize that was logged> — tracks what context size was last logged
+  private contextLoggedSessions = new Map<string, number>()
+
+  // Sessions where repo instruction info has been shown in metadata.loaded
+  private repoInfoShownSessions = new Set<string>()
 
   // --- Path instruction tracking ---
 
@@ -29,13 +36,13 @@ export class SessionState {
   /**
    * Mark a file as injected in a session.
    */
-  markFileInjected(sessionId: string, file: string): void {
+  markFileInjected(sessionId: string, file: string, tokenCount: number): void {
     let sessionFiles = this.injectedPerSession.get(sessionId)
     if (!sessionFiles) {
-      sessionFiles = new Set<string>()
+      sessionFiles = new Map<string, number>()
       this.injectedPerSession.set(sessionId, sessionFiles)
     }
-    sessionFiles.add(file)
+    sessionFiles.set(file, tokenCount)
   }
 
   /**
@@ -53,7 +60,20 @@ export class SessionState {
    */
   getInjectedFiles(sessionId: string): Set<string> {
     const sessionFiles = this.injectedPerSession.get(sessionId)
-    return new Set(sessionFiles ?? [])
+    return new Set(sessionFiles?.keys() ?? [])
+  }
+
+  /**
+   * Sum token counts for all instructions currently injected in a session.
+   */
+  getInjectedTokens(sessionId: string): number {
+    const sessionFiles = this.injectedPerSession.get(sessionId)
+    if (!sessionFiles) return 0
+    let total = 0
+    for (const tokens of sessionFiles.values()) {
+      total += tokens
+    }
+    return total
   }
 
   /**
@@ -64,7 +84,7 @@ export class SessionState {
    */
   syncWithMarkers(presentMarkers: Set<string>): void {
     for (const [_sessionId, injectedFiles] of this.injectedPerSession) {
-      for (const file of injectedFiles) {
+      for (const file of injectedFiles.keys()) {
         const filename = path.basename(file)
         if (!presentMarkers.has(filename)) {
           injectedFiles.delete(file)
@@ -80,6 +100,44 @@ export class SessionState {
    */
   clearSession(sessionId: string): void {
     this.injectedPerSession.delete(sessionId)
+    this.contextSizePerSession.delete(sessionId)
+    this.contextLoggedSessions.delete(sessionId)
+    this.repoInfoShownSessions.delete(sessionId)
+  }
+
+  // --- Context size tracking ---
+
+  setContextSize(sessionId: string, contextSize: number): void {
+    this.contextSizePerSession.set(sessionId, contextSize)
+  }
+
+  getContextSize(sessionId: string): number {
+    return this.contextSizePerSession.get(sessionId) ?? 0
+  }
+
+  // --- Context logging tracking ---
+
+  /**
+   * Check if context has been logged for a session with a specific context size.
+   * Returns true only if previously logged with the same context size,
+   * allowing re-logging when the model (and its context window) changes.
+   */
+  isContextLogged(sessionId: string, contextSize: number): boolean {
+    return this.contextLoggedSessions.get(sessionId) === contextSize
+  }
+
+  markContextLogged(sessionId: string, contextSize: number): void {
+    this.contextLoggedSessions.set(sessionId, contextSize)
+  }
+
+  // --- Repo info display tracking ---
+
+  isRepoInfoShown(sessionId: string): boolean {
+    return this.repoInfoShownSessions.has(sessionId)
+  }
+
+  markRepoInfoShown(sessionId: string): void {
+    this.repoInfoShownSessions.add(sessionId)
   }
 
   // --- Pending instructions (tool call lifecycle) ---
@@ -87,7 +145,7 @@ export class SessionState {
   /**
    * Store pending instructions to inject after a tool call completes.
    */
-  setPending(callId: string, text: string, loadedFiles: string[] = []): void {
+  setPending(callId: string, text: string, loadedFiles: Array<{ file: string; tokenCount: number }> = []): void {
     this.pendingInstructions.set(callId, { text, loadedFiles })
   }
 
@@ -103,7 +161,7 @@ export class SessionState {
    * The instructions are deleted after retrieval.
    * Returns both the instruction text and the loaded file paths.
    */
-  consumePending(callId: string): { text: string; loadedFiles: string[] } | undefined {
+  consumePending(callId: string): { text: string; loadedFiles: Array<{ file: string; tokenCount: number }> } | undefined {
     const entry = this.pendingInstructions.get(callId)
     if (entry !== undefined) {
       this.pendingInstructions.delete(callId)
