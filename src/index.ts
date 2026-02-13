@@ -94,7 +94,6 @@ export const CopilotInstructionsPlugin: Plugin = async (ctx) => {
   const state = new SessionState()
 
   return {
-
     // Listen for session events
     event: async ({ event }) => {
       // Log all events for debugging
