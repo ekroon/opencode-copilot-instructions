@@ -30,7 +30,7 @@
   },
   "dependencies": {
     "front-matter": "^4.0.2",
-    "picomatch": "^4.0.0"
+    "picomatch": "^4.0.4"
   },
   "peerDependencies": {
     "@opencode-ai/plugin": "*"
